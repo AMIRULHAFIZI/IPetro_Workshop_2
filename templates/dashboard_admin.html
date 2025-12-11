@@ -1,0 +1,213 @@
+{% extends 'base_admin.html' %}
+
+{% block title %}Admin Dashboard - {{ super() }}{% endblock %}
+
+{% block head %}
+<style>
+    /* Custom styles for the dark theme dashboard */
+    .stat-card {
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 6px 6px rgba(0, 0, 0, 0.1);
+    }
+    .quick-action-btn {
+        transition: all 0.2s ease-in-out;
+    }
+    .quick-action-btn:hover {
+        transform: translateY(-2px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <!-- 1. Header Section with Date/Time -->
+    <div class="flex justify-end items-center mb-6">
+        <!-- Quick Actions Removed -->
+        
+        <!-- Live Date and Time -->
+        <div class="flex space-x-4">
+            <div class_ ="bg-white p-3 rounded-lg shadow flex items-center space-x-2 border border-gray-200">
+                <i data-lucide="calendar" class="w-5 h-5 text-gray-500"></i>
+                <span id="live-day-date" class="text-sm font-medium text-gray-700"></span>
+            </div>
+            <div class_ ="bg-white p-3 rounded-lg shadow flex items-center space-x-2 border border-gray-200">
+                <i data-lucide="clock" class="w-5 h-5 text-gray-500"></i>
+                <span id="live-time" class="text-sm font-medium text-gray-700"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Statistics Cards Section -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        
+        <!-- Stat Card: Total Users (Detailed) -->
+        <div class="stat-card bg-slate-800 p-6 rounded-lg shadow-lg text-white">
+            <div class="flex items-center space-x-4 mb-4">
+                <div class="flex-shrink-0 bg-blue-500/20 text-blue-300 p-3 rounded-full">
+                    <i data-lucide="users" class="w-7 h-7"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">Total Users</p>
+                    <p class="text-3xl font-bold text-white">{{ user_count | default('0') }}</p>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-slate-700 text-sm">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-slate-400">Admins:</span>
+                    <span class="font-semibold text-white">{{ admin_count | default('0') }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-slate-400">Engineers:</span>
+                    <span class="font-semibold text-white">{{ engineer_count | default('0') }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ***** MODIFIED: Files Processed Card ***** -->
+        <div class="stat-card bg-slate-800 p-6 rounded-lg shadow-lg text-white">
+            <!-- Top Section: Main Count -->
+            <div class="flex items-center space-x-4 mb-4">
+                <div class="flex-shrink-0 bg-green-500/20 text-green-300 p-3 rounded-full">
+                    <i data-lucide="file-check-2" class="w-7 h-7"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">Files Processed</p>
+                    <p class="text-3xl font-bold text-white">{{ file_count_total | default('0') }}</p>
+                </div>
+            </div>
+            <!-- Bottom Section: Today vs Total -->
+            <div class="mt-4 pt-4 border-t border-slate-700 text-sm flex justify-between items-center">
+                <div class="text-center">
+                    <span class="text-slate-400">Today</span>
+                    <p class="text-xl font-semibold text-white">{{ file_count_today | default('0') }}</p>
+                </div>
+                <div class="text-center">
+                    <span class="text-slate-400">Total</span>
+                    <p class="text-xl font-semibold text-white">{{ file_count_total | default('0') }}</p>
+                </div>
+            </div>
+        </div>
+        <!-- ***** END MODIFIED CARD ***** -->
+
+        <!-- Placeholder Card 3 -->
+        <div class="stat-card bg-slate-800 p-6 rounded-lg shadow-lg text-white">
+            <div class="flex items-center space-x-4">
+                <div class="flex-shrink-0 bg-yellow-500/20 text-yellow-300 p-3 rounded-full">
+                    <i data-lucide="bar-chart-3" class="w-7 h-7"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">Pending Tasks</p>
+                    <p class="text-3xl font-bold text-white">0</p>
+                </div>
+            </div>
+             <div class="mt-4 pt-4 border-t border-slate-700 text-sm text-slate-400">
+                No pending jobs.
+            </div>
+        </div>
+
+        <!-- Placeholder Card 4 -->
+        <div class="stat-card bg-slate-800 p-6 rounded-lg shadow-lg text-white">
+            <div class="flex items-center space-x-4">
+                <div class="flex-shrink-0 bg-red-500/20 text-red-300 p-3 rounded-full">
+                    <i data-lucide="alert-triangle" class="w-7 h-7"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">System Alerts</p>
+                    <p class="text-3xl font-bold text-white">0</p>
+                </div>
+            </div>
+             <div class="mt-4 pt-4 border-t border-slate-700 text-sm text-slate-400">
+                All systems nominal.
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Recent Users Table -->
+    <div class="bg-white p-6 rounded-lg shadow-lg">
+        <h2 class="text-xl font-semibold text-gray-800 mb-4">Recent Users</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-200">
+                        <th class="p-3 text-sm font-semibold text-slate-600 uppercase tracking-wider">User</th>
+                        <th class="p-3 text-sm font-semibold text-slate-600 uppercase tracking-wider">Role</th>
+                        <th class="p-3 text-sm font-semibold text-slate-600 uppercase tracking-wider">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                    {% if recent_users %}
+                        {% for user in recent_users %}
+                        <tr>
+                            <td class="p-3 whitespace-nowrap">
+                                <div class="flex items-center space-x-3">
+                                    <div class="h-10 w-10 bg-slate-200 text-slate-600 rounded-full flex items-center justify-center font-medium">
+                                        {{ user.name[0] | upper }}
+                                    </div>
+                                    <div>
+                                        <p class="font-medium text-gray-800">{{ user.name }}</p>
+                                        <p class="text-sm text-gray-500">{{ user.email }}</p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="p-3 whitespace-nowrap">
+                                {% if user.role.role_name == 'Manager' %}
+                                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                                        {{ user.role.role_name }}
+                                    </span>
+                                {% else %}
+                                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                                        {{ user.role.role_name }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td class="p-3 whitespace-nowrap">
+                                <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    Active
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="3" class="p-3 text-center text-gray-500">
+                                No users found.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript for Live Date and Time -->
+<script>
+    function updateDateTime() {
+        const now = new Date();
+        
+        // Format Day and Date
+        const dayDateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        document.getElementById('live-day-date').innerText = now.toLocaleDateString('en-US', dayDateOptions);
+
+        // Format Time
+        const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+        document.getElementById('live-time').innerText = now.toLocaleTimeString('en-US', timeOptions);
+    }
+
+    // Update the time every second
+    setInterval(updateDateTime, 1000);
+
+    // Run on page load to avoid delay
+    document.addEventListener('DOMContentLoaded', (event) => {
+        updateDateTime();
+        
+        // Re-run lucide.createIcons() as new icons were loaded in this template
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    });
+</script>
+{% endblock %}

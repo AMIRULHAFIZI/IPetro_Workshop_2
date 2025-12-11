@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block title %}Select Equipment & Upload Drawing{% endblock %}
+
+{% block head %}
+    <style>
+        /* Ensures only one step is visible at a time */
+        .step-content {
+            display: none;
+        }
+        .active-step {
+            display: block;
+        }
+        /* Style for the dynamically populated list of parts */
+        .part-list-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 0;
+            background-color: #f9fafb;
+        }
+        /* Sticky header for the parts table */
+        .part-list-container thead {
+            position: sticky;
+            top: 0;
+            background-color: #f9fafb;
+            z-index: 10;
+        }
+        /* Hide the default file input */
+        #drawings {
+            display: none;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="w-full h-full flex items-center justify-center p-4">
+
+    <div class="container mx-auto max-w-4xl">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-4">
+                {% for category, message in messages %}
+                <div class="{% if category == 'success' %}bg-green-100 border-green-400 text-green-700{% elif category == 'error' %}bg-red-100 border-red-400 text-red-700{% else %}bg-yellow-100 border-yellow-400 text-yellow-700{% endif %} border px-4 py-3 rounded-md" role="alert">
+                    <span class="font-medium">{{ message }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="bg-white shadow-xl rounded-lg overflow-hidden">
+            <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" id="main-upload-form">
+                
+                <input type="hidden" name="selected_equipment_no" id="hidden_equipment_no">
+                <input type="hidden" name="selected_description" id="hidden_description">
+                <input type="hidden" name="parts_data" id="hidden_parts_data">
+
+                <div class="p-8 md:p-12">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-8 text-center">Equipment Data Preparation</h1>
+
+                    <div id="step-1" class="step-content active-step">
+                        <h2 class="text-xl font-semibold text-gray-700 mb-4">Step 1: Select Equipment <span class="text-blue-500">🔧</span></h2>
+                        <p class="text-gray-600 mb-6">Choose the **Equipment Number** for which you are extracting data. This will auto-recommend the primary parts.</p>
+                        
+                        <div class="mb-6">
+                            <label for="equipment_select" class="block text-sm font-medium text-gray-700 mb-2">Equipment No. / Description</label>
+                            <select id="equipment_select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md" required>
+                                <option value="" data-id="" disabled selected>-- Select Equipment No. (e.g., V-001) --</option>
+                                {% for eq in equipment_options %}
+                                <option value="{{ eq.equipmentNo }}" data-id="{{ eq.equipmentID }}" data-desc="{{ eq.equipment_desc }}">{{ eq.equipmentNo }} - {{ eq.equipment_desc }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div id="equipment-details" class="bg-blue-50 border-l-4 border-blue-400 text-blue-800 p-4" role="alert" style="display:none;">
+                            <p class="font-bold">Equipment Description</p>
+                            <p id="detail-description"></p>
+                        </div>
+
+                        <div class="mt-6 text-right">
+                            <button type="button" id="next-to-step-2" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition duration-300 opacity-50 cursor-not-allowed" disabled>
+                                Next: Review Parts <span data-lucide="chevron-right" class="w-5 h-5 inline-block"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="step-2" class="step-content">
+                        <h2 class="text-xl font-semibold text-gray-700 mb-4">Step 2: Review & Edit Parts <span class="text-blue-500">📋</span></h2>
+                        <p class="text-gray-600 mb-6">The system recommends parts for **<span id="review-equipment-no" class="font-bold text-blue-600"></span>**. Use the list below to confirm which parts will be included in the final Excel template.</p>
+
+                        <div class="part-list-container mb-6">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part Name</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fluid (DB Default)</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Spec (DB Default)</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="parts-table-body" class="bg-white divide-y divide-gray-200">
+                                    </tbody>
+                            </table>
+                            <div id="no-parts-message" class="p-4 text-center text-gray-500" style="display:none;">No recommended parts found.</div>
+                        </div>
+
+                        <div class="flex justify-between items-center mt-6">
+                            <button type="button" id="back-to-step-1" class="px-6 py-2 bg-gray-500 text-white font-bold rounded-lg shadow-md hover:bg-gray-600 transition duration-300">
+                                <span data-lucide="chevron-left" class="w-5 h-5 inline-block"></span> Back
+                            </button>
+                            <button type="button" id="next-to-step-3" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition duration-300 opacity-50 cursor-not-allowed" disabled>
+                                Next: Upload Drawing <span data-lucide="chevron-right" class="w-5 h-5 inline-block"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="step-3" class="step-content">
+                        <h2 class="text-xl font-semibold text-gray-700 mb-4">Step 3: Upload Drawing <span class="text-blue-500">📄</span></h2>
+                        <p class="text-gray-600 mb-6">Upload the General Arrangement (GA) drawing for **<span id="upload-equipment-no" class="font-bold text-blue-600"></span>** to allow the system to extract the **Design/Operating Parameters**.</p>
+
+                        <label for="drawings" class="relative block w-full border-2 border-dashed border-gray-300 rounded-lg p-10 text-center cursor-pointer hover:border-blue-500 transition-colors" id="drop-zone">
+                            <span class="text-gray-400" id="file-label">Click here to select drawing (PDF only)...</span>
+                            <input type="file" name="drawings" id="drawings" required accept="application/pdf">
+                        </label>
+                        
+                        <p id="file-status-message" class="text-sm mt-2 text-gray-500">No file chosen. Only a single PDF is allowed.</p>
+                        
+                        <div class="flex justify-between items-center mt-6">
+                            <button type="button" id="back-to-step-2" class="px-6 py-2 bg-gray-500 text-white font-bold rounded-lg shadow-md hover:bg-gray-600 transition duration-300">
+                                <span data-lucide="chevron-left" class="w-5 h-5 inline-block"></span> Back
+                            </button>
+                            <button type="submit" 
+                                    id="submit-button"
+                                    class="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 transition duration-300 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 opacity-50 cursor-not-allowed" disabled>
+                                Process Drawing
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+                
+                <div class="text-center pb-6 -mt-4">
+                    <p class="text-sm text-gray-600">
+                        Need to bypass the selection flow?
+                        <a href="{{ url_for('manual_input') }}" class="font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                            Insert data manually
+                        </a>
+                    </p>
+                </div>
+
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const equipmentSelect = document.getElementById('equipment_select');
+        const nextToStep2Button = document.getElementById('next-to-step-2');
+        const nextToStep3Button = document.getElementById('next-to-step-3');
+        const backToStep1Button = document.getElementById('back-to-step-1');
+        const backToStep2Button = document.getElementById('back-to-step-2');
+        const partsTableBody = document.getElementById('parts-table-body');
+        const noPartsMessage = document.getElementById('no-parts-message');
+        
+        // Hidden fields
+        const hiddenEquipmentNo = document.getElementById('hidden_equipment_no');
+        const hiddenDescription = document.getElementById('hidden_description');
+        const hiddenPartsData = document.getElementById('hidden_parts_data');
+
+        // Step 3 Elements
+        const fileInput = document.getElementById('drawings');
+        const dropZone = document.getElementById('drop-zone');
+        const fileLabel = document.getElementById('file-label');
+        const statusMessage = document.getElementById('file-status-message');
+        const submitButton = document.getElementById('submit-button');
+
+        let allEquipmentData = []; // To store fetched equipment and part data
+        let currentPartsList = []; // The list of parts currently selected by the user
+
+        // --- Step Management ---
+        function showStep(stepNumber) {
+            document.querySelectorAll('.step-content').forEach(el => {
+                el.classList.remove('active-step');
+            });
+            document.getElementById(`step-${stepNumber}`).classList.add('active-step');
+            // Scroll to the top of the new step
+            window.scrollTo({ top: 0, behavior: 'smooth' }); 
+        }
+
+        // --- Data Fetching ---
+        async function fetchEquipmentData() {
+            try {
+                const response = await fetch('{{ url_for("get_equipment_data") }}');
+                if (!response.ok) throw new Error('Failed to fetch equipment data');
+                allEquipmentData = await response.json();
+                console.log('Fetched equipment data:', allEquipmentData);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                alert('Error loading equipment data from server. Check console.');
+            }
+        }
+
+        // --- Part List Rendering and Management ---
+        function updateStep2Buttons() {
+            if (currentPartsList.length === 0) {
+                nextToStep3Button.disabled = true;
+                nextToStep3Button.classList.add('opacity-50', 'cursor-not-allowed');
+                noPartsMessage.style.display = 'block';
+            } else {
+                nextToStep3Button.disabled = false;
+                nextToStep3Button.classList.remove('opacity-50', 'cursor-not-allowed');
+                noPartsMessage.style.display = 'none';
+            }
+        }
+
+        function renderPartsList(parts) {
+            partsTableBody.innerHTML = '';
+            currentPartsList = parts;
+            hiddenPartsData.value = JSON.stringify(currentPartsList); // Update hidden field
+            
+            parts.forEach((part, index) => {
+                const row = partsTableBody.insertRow();
+                row.id = `part-row-${index}`;
+                row.className = 'hover:bg-gray-50';
+
+                // Part Name
+                let cellName = row.insertCell();
+                cellName.className = 'px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900';
+                cellName.textContent = part.name;
+
+                // Fluid
+                let cellFluid = row.insertCell();
+                cellFluid.className = 'px-3 py-2 whitespace-nowrap text-sm text-gray-500';
+                cellFluid.textContent = part.fluid || 'N/A';
+
+                // Spec
+                let cellSpec = row.insertCell();
+                cellSpec.className = 'px-3 py-2 whitespace-nowrap text-sm text-gray-500';
+                cellSpec.textContent = part.spec || 'N/A';
+
+                // Remove Button
+                let cellRemove = row.insertCell();
+                cellRemove.className = 'px-3 py-2 whitespace-nowrap text-right text-sm font-medium';
+                const removeBtn = document.createElement('button');
+                removeBtn.innerHTML = '<span data-lucide="x" class="w-4 h-4 inline-block text-red-600"></span> Remove';
+                removeBtn.className = 'text-red-600 hover:text-red-900';
+                removeBtn.type = 'button';
+                removeBtn.onclick = () => removePart(index);
+                cellRemove.appendChild(removeBtn);
+            });
+            lucide.createIcons(); // Re-render Lucide icons
+            updateStep2Buttons();
+        }
+
+        function removePart(index) {
+            currentPartsList.splice(index, 1);
+            renderPartsList(currentPartsList); // Re-render the list
+        }
+
+        // --- Step 1 Handlers ---
+        equipmentSelect.addEventListener('change', (e) => {
+            const selectedOption = e.target.options[e.target.selectedIndex];
+            const equipmentNo = selectedOption.value;
+            const description = selectedOption.getAttribute('data-desc');
+            const detailsDiv = document.getElementById('equipment-details');
+            const detailDescription = document.getElementById('detail-description');
+
+            if (equipmentNo) {
+                detailsDiv.style.display = 'block';
+                detailDescription.textContent = description;
+                nextToStep2Button.disabled = false;
+                nextToStep2Button.classList.remove('opacity-50', 'cursor-not-allowed');
+                
+                // Store in hidden fields
+                hiddenEquipmentNo.value = equipmentNo;
+                hiddenDescription.value = description;
+
+                const selectedEquipment = allEquipmentData.find(eq => eq.equipmentNo === equipmentNo);
+                
+                if (selectedEquipment) {
+                    // Clone the parts list to allow local edits (removals)
+                    renderPartsList([...selectedEquipment.recommended_parts]);
+                } else {
+                    renderPartsList([]);
+                }
+            } else {
+                detailsDiv.style.display = 'none';
+                nextToStep2Button.disabled = true;
+                nextToStep2Button.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        });
+
+        nextToStep2Button.addEventListener('click', () => {
+            if (equipmentSelect.value) {
+                document.getElementById('review-equipment-no').textContent = equipmentSelect.value;
+                showStep(2);
+            }
+        });
+
+        // --- Step 2 Handlers ---
+        backToStep1Button.addEventListener('click', () => {
+            showStep(1);
+        });
+
+        nextToStep3Button.addEventListener('click', () => {
+            if (currentPartsList.length > 0) {
+                document.getElementById('upload-equipment-no').textContent = equipmentSelect.value;
+                validateFiles(fileInput.files); // Re-validate file input status for Step 3 
+                showStep(3);
+            } else {
+                alert("Please select at least one part before proceeding.");
+            }
+        });
+        
+        // --- Step 3 Handlers ---
+        backToStep2Button.addEventListener('click', () => {
+            showStep(2);
+        });
+        
+        // --- File Input Validation (Ensures a single PDF) ---
+        function validateFiles(files) {
+            // Reset state
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'border-green-500', 'bg-green-50', 'border-red-500', 'bg-red-50');
+            dropZone.classList.add('border-gray-300');
+            submitButton.disabled = true;
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+            statusMessage.className = 'text-sm mt-2 text-gray-500';
+
+            if (files.length === 0) {
+                fileLabel.textContent = 'Click here to select drawing (PDF only)...';
+                statusMessage.textContent = 'No file chosen. Only a single PDF is allowed.';
+            } else if (files.length > 1) {
+                dropZone.classList.remove('border-gray-300');
+                dropZone.classList.add('border-red-500', 'bg-red-50');
+                fileLabel.textContent = 'Too many files selected. Please select ONLY ONE PDF.';
+                statusMessage.textContent = 'Error: Only one PDF drawing is allowed.';
+                statusMessage.className = 'text-sm mt-2 text-red-600';
+            } else if (files[0].type !== 'application/pdf') {
+                dropZone.classList.remove('border-gray-300');
+                dropZone.classList.add('border-red-500', 'bg-red-50');
+                fileLabel.textContent = 'Wrong format file. Please upload PDF only.';
+                statusMessage.textContent = 'Error: File is not a PDF.';
+                statusMessage.className = 'text-sm mt-2 text-red-600';
+            } else {
+                // Success state: Single PDF selected
+                dropZone.classList.remove('border-gray-300');
+                dropZone.classList.add('border-green-500', 'bg-green-50');
+                fileLabel.textContent = files[0].name;
+                fileLabel.style.whiteSpace = 'normal';
+                fileLabel.style.color = '#1f2937';
+                statusMessage.textContent = 'File chosen. Ready to process.';
+                statusMessage.className = 'text-sm mt-2 text-green-600';
+                submitButton.disabled = false;
+                submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        fileInput.addEventListener('change', (e) => {
+            validateFiles(fileInput.files);
+        });
+
+        // Drag/Drop visual feedback
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-gray-300', 'border-green-500', 'border-red-500');
+            dropZone.classList.add('border-blue-500');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500');
+            validateFiles(fileInput.files);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileInput.files = e.dataTransfer.files;
+            fileInput.dispatchEvent(new Event('change'));
+        });
+
+        // Load data on page load
+        fetchEquipmentData();
+        lucide.createIcons(); // Initialize Lucide icons
+    });
+</script>
+{% endblock %}

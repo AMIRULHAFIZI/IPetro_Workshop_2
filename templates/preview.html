@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Extracted Data Preview{% endblock %}
+
+{% block head %}
+    <!-- Specific styles for the preview page -->
+    <style>
+        /* Basic table styling */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 10px; /* Smaller font for dense data */
+        }
+        th, td {
+            border: 1px solid #9ca3af; /* gray-400 */
+            padding: 4px 6px;
+            text-align: center;
+        }
+        th {
+            background-color: #f3f4f6; /* gray-100 */
+            font-weight: bold;
+            vertical-align: middle;
+        }
+        /* Style for editable inputs */
+        input[type="text"] {
+            width: 100%;
+            padding: 4px;
+            border: 1px solid #d1d5db; /* gray-300 */
+            border-radius: 4px;
+            font-size: 10px;
+        }
+        input[type="text"]:focus {
+            outline: 2px solid #3b82f6; /* blue-500 */
+            border-color: transparent;
+        }
+        /* Header rows */
+        .header-row-1 th { background-color: #dbeafe; /* blue-100 */ }
+        .header-row-2 th { background-color: #bfdbfe; /* blue-200 */ }
+        .header-row-3 th { background-color: #93c5fd; /* blue-300 */ }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto max-w-7xl bg-white shadow-lg rounded-lg p-6">
+
+    <div class="mb-6 text-center">
+        <h1 class="text-2xl font-bold text-gray-800">MASTERFILE EQUIPMENT</h1>
+        <p class="text-lg text-gray-600">TOTAL NO. OF EQUIPMENT: {{ equipment_count }} EQUIPMENTS</p>
+    </div>
+    
+    <!-- NEW: Instructional Text -->
+    <div class="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 rounded-lg" role="alert">
+        <p class="font-semibold text-base">Review Required</p>
+        <p class="text-sm">Please **edit and confirm your data** before proceeding to the next step. Use the "View Original Drawing" button below for reference.</p>
+    </div>
+    
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="mb-4">
+        {% for category, message in messages %}
+          <div class="{% if category == 'success' %} bg-green-100 border-green-400 text-green-700 {% else %} bg-red-100 border-red-400 text-red-700 {% endif %} border px-4 py-3 rounded relative" role="alert">
+            <span class="block sm:inline">{{ message }}</span>
+          </div>
+        {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('save_data') }}" method="POST">
+        <!-- Hidden field for tracking which temp file this data came from -->
+        {% if temp_file %}
+        <input type="hidden" name="temp_file" value="{{ temp_file }}">
+        {% endif %}
+
+        <!-- NEW: View Original Drawing Button -->
+        {% if data_rows %}
+            {% set drawing_name = data_rows[0]['source_drawing'] %}
+            <div class="mb-4 flex justify-end">
+                <a href="{{ url_for('view_uploaded_file', filename=drawing_name) }}" target="_blank"
+                   class="inline-block px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition duration-300 text-sm">
+                    View Original Drawing ({{ drawing_name }})
+                </a>
+            </div>
+        {% endif %}
+
+        <!-- Editable Table -->
+        <div class="overflow-x-auto">
+            <table class="min-w-full">
+                <thead class="bg-gray-100">
+                    <tr class="header-row-1">
+                        <th rowspan="3">NO.</th>
+                        <th rowspan="3">EQUIPMENT NO. </th>
+                        <th rowspan="3">PMT NO.</th>
+                        <th rowspan="3">EQUIPMENT DESCRIPTION</th>
+                        <th rowspan="3">PARTS</th>
+                        <th rowspan="3">PHASE</th>
+                        <th rowspan="3">FLUID</th>
+                        <th colspan="3">MATERIAL INFORMATION</th>
+                        <th rowspan="3">INSULATION</th>
+                        <th colspan="2">DESIGN</th>
+                        <th colspan="2">OPERATING</th>
+                    </tr>
+                    <tr class="header-row-2">
+                        <th rowspan="2">TYPE</th>
+                        <th rowspan="2">SPEC.</th>
+                        <th rowspan="2">GRADE</th>
+                        <th colspan="2"></th>
+                        <th colspan="2"></th>
+                    </tr>
+                    <tr class="header-row-3">
+                        <th>TEMP. (°C) </th>
+                        <th>PRESSURE (Mpa) </th>
+                        <th>TEMP. (°C)</th>
+                        <th>PRESSURE (Mpa)</th>
+                    </tr>
+                </thead>
+                
+                <tbody id="data-preview-body">
+                    
+                    <!-- Loop through data and create editable input fields -->
+                    {% for row in data_rows %}
+                    <tr>
+                        <!-- Hidden field to pass back the original drawing name -->
+                        <input type="hidden" name="source_drawing" value="{{ row['source_drawing'] }}">
+
+                        <!-- 
+                          *** THIS IS THE FIX ***
+                          Use the 'NO.' from the data row if it exists, otherwise use the loop index.
+                        -->
+                        <td><input type="text" name="NO." value="{{ row['NO.'] or loop.index }}"></td>
+                        
+                        <td><input type="text" name="EQUIPMENT NO. " value="{{ row['EQUIPMENT NO. '] }}"></td>
+                        <td><input type="text" name="PMT NO." value="{{ row['PMT NO.'] }}"></td>
+                        <td><input type="text" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}"></td>
+                        <td><input type="text" name="PARTS" value="{{ row['PARTS'] }}"></td>
+                        <td><input type="text" name="PHASE" value="{{ row['PHASE'] }}"></td>
+                        <td><input type="text" name="FLUID" value="{{ row['FLUID'] }}"></td>
+                        <td><input type="text" name="TYPE" value="{{ row['TYPE'] }}"></td>
+                        <td><input type="text" name="SPEC." value="{{ row['SPEC.'] }}"></td>
+                        <td><input type="text" name="GRADE" value="{{ row['GRADE'] }}"></td>
+                        <td><input type="text" name="INSULATION" value="{{ row['INSULATION'] }}"></td>
+                        <td><input type="text" name="TEMP. (°C) " value="{{ row['TEMP. (°C) '] }}"></td>
+                        <td><input type="text" name="PRESSURE (Mpa) " value="{{ row['PRESSURE (Mpa) '] }}"></td>
+                        <td><input type="text" name="TEMP. (°C)" value="{{ row['TEMP. (°C)'] }}"></td>
+                        <td><input type="text" name="PRESSURE (Mpa)" value="{{ row['PRESSURE (Mpa)'] }}"></td>
+                    </tr>
+                    {% endfor %}
+                    
+                    {% if not data_rows %}
+                    <!-- Placeholder row if no data -->
+                    <tr>
+                        <td colspan="15" class="text-center text-gray-500 py-4">No data extracted. Upload files to begin.</td>
+                    </tr>
+                    {% endif %}
+                    
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Action Buttons (at the bottom) -->
+        <div class="mt-6 flex space-x-4">
+            {% if not excel_file %}
+            <button type="submit"
+                class="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-300">
+                Finish & Save
+            </button>
+            {% endif %}
+
+            {% if excel_file %}
+            <a href="{{ url_for('download_file', filename=excel_file) }}"
+                class="inline-block px-6 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-300">
+                Download Compiled Excel File
+            </a>
+            {% endif %}
+        </div>
+
+    </form>
+</div>
+{% endblock %}

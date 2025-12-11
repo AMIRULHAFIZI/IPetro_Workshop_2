@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Drawings{% endblock %}
+
+{% block head %}
+    <!-- Specific styles for this page -->
+    <style>
+        /* Custom style for the file input button */
+        .file-input-button {
+            cursor: pointer;
+            padding: 8px 16px;
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+            border-radius: 6px;
+            transition: background-color 0.3s;
+        }
+        .file-input-button:hover {
+            background-color: #2563eb; /* blue-600 */
+        }
+        /* Hide the default file input */
+        #drawings {
+            display: none;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<!-- This wrapper div centers the content box -->
+<div class="w-full h-full flex items-center justify-center p-4">
+
+    <div class="container mx-auto max-w-2xl">
+        
+        <!-- Flash messages will appear here -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-4">
+                {% for category, message in messages %}
+                <div class="{% if category == 'success' %}bg-green-100 border-green-400 text-green-700{% elif category == 'error' %}bg-red-100 border-red-400 text-red-700{% else %}bg-yellow-100 border-yellow-400 text-yellow-700{% endif %} border px-4 py-3 rounded-md" role="alert">
+                    <span class="font-medium">{{ message }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% endwith %}
+
+        <!-- Main Upload Card -->
+        <div class="bg-white shadow-xl rounded-lg overflow-hidden">
+            <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+                <div class="p-8 md:p-12 text-center">
+                    
+                    <!-- Icon -->
+                    <div class="flex items-center justify-center mx-auto w-20 h-20 bg-blue-100 rounded-full mb-6">
+                        <i data-lucide="file-check-2" class="w-10 h-10 text-blue-600"></i>
+                    </div>
+
+                    <h1 class="text-3xl font-bold text-gray-800 mb-3">Upload PDF Drawings</h1>
+                    <p class="text-gray-500 mb-8">Drag and drop your files or click to browse.</p>
+
+                    <!-- File Input Area -->
+                    <label for="drawings" class="relative block w-full border-2 border-dashed border-gray-300 rounded-lg p-10 text-center cursor-pointer hover:border-blue-500 transition-colors"
+                           id="drop-zone">
+                        <span class="text-gray-400" id="file-label">Click here to select files...</span>
+                        <!-- This input MUST have name="drawings" and "multiple" to match app.py -->
+                        <input type="file" name="drawings" id="drawings" multiple required accept="application/pdf">
+                    </label>
+                    
+                    <!-- *** NEW: Status Message *** -->
+                    <p id="file-status-message" class="text-sm mt-2 text-gray-500">No file chosen.</p>
+                    
+                </div>
+                
+                <!-- Footer with Submit Button -->
+                <div class="px-8 py-6 bg-gray-50 text-right">
+                    <button type="submit" 
+                            id="submit-button"
+                            class="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 flex items-center justify-center ml-auto">
+                            <span id="btn-text">Process Drawings</span>
+                            <span id="btn-spinner" class="hidden ml-2">
+                                <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </span>
+                    </button>
+                </div>
+            </form>
+
+            <!-- *** NEW: Manual Input Link *** -->
+            <div class="text-center pb-6 -mt-4">
+                <p class="text-sm text-gray-600">
+                    Having problems with extraction?
+                    <a href="{{ url_for('manual_input') }}" class="font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                        Insert data manually
+                    </a>
+                </p>
+            </div>
+            <!-- *** END NEW *** -->
+
+        </div>
+
+        <!-- This section appears after a successful upload (if you redirect back here) -->
+        {% if excel_file %}
+        <div class="results text-center bg-white shadow-xl rounded-lg p-8 mt-6">
+            <div class="flex items-center justify-center mx-auto w-16 h-16 bg-green-100 rounded-full mb-4">
+                <i data-lucide="check-circle" class="w-8 h-8 text-green-600"></i>
+            </div>
+            <h2 class="text-2xl font-semibold text-gray-800 mb-2">Processing Complete!</h2>
+            <p class="text-gray-500 mb-6">Your file is ready for download.</p>
+            
+            <a href="{{ url_for('download_file', filename=excel_file) }}" 
+               class="inline-block px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 transition duration-300">
+                Download Excel (.xlsx)
+            </a>
+        </div>
+        {% endif %}
+    </div>
+    
+</div>
+
+<!-- *** UPDATED JAVASCRIPT *** -->
+<script>
+    // Wait for the DOM to be fully loaded
+    document.addEventListener('DOMContentLoaded', () => {
+        const fileInput = document.getElementById('drawings');
+        const fileLabel = document.getElementById('file-label');
+        const dropZone = document.getElementById('drop-zone');
+        const statusMessage = document.getElementById('file-status-message');
+        const submitButton = document.getElementById('submit-button');
+        
+        // --- NEW: Spinner Logic Variables ---
+        const uploadForm = document.getElementById('upload-form');
+        const btnText = document.getElementById('btn-text');
+        const btnSpinner = document.getElementById('btn-spinner');
+
+        // --- NEW: Submit Listener to show spinner ---
+        uploadForm.addEventListener('submit', (e) => {
+            // Verify file input isn't empty just in case
+            if (fileInput.files.length > 0) {
+                // Disable button and dim it
+                submitButton.disabled = true;
+                submitButton.classList.add('opacity-75', 'cursor-wait');
+                
+                // Show spinner and change text
+                btnText.textContent = "Processing...";
+                btnSpinner.classList.remove('hidden');
+            }
+        });
+
+        function validateFiles(files) {
+            // Reset styles first
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50', 'border-green-500', 'bg-green-50', 'border-red-500', 'bg-red-50');
+            fileLabel.style.textAlign = 'center';
+            fileLabel.style.whiteSpace = 'normal';
+            fileLabel.style.color = '#9ca3af'; // Default gray
+            dropZone.classList.add('border-gray-300'); // Default border
+            submitButton.disabled = true;
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+
+            if (files.length === 0) {
+                // 1. No file chosen state
+                fileLabel.textContent = 'Click here to select files...';
+                statusMessage.textContent = 'No file chosen.';
+                statusMessage.className = 'text-sm mt-2 text-gray-500'; // Default color
+            } else {
+                let allPdfs = true;
+                let fileList = [];
+
+                for (let i = 0; i < files.length; i++) {
+                    fileList.push(files[i].name);
+                    if (files[i].type !== 'application/pdf') {
+                        allPdfs = false;
+                    }
+                }
+
+                if (allPdfs) {
+                    // 2. Valid PDF(s) state
+                    dropZone.classList.remove('border-gray-300');
+                    dropZone.classList.add('border-green-500', 'bg-green-50');
+                    fileLabel.textContent = fileList.join('\n');
+                    fileLabel.style.textAlign = 'left';
+                    fileLabel.style.whiteSpace = 'pre-wrap';
+                    fileLabel.style.color = '#1f2937'; // Dark text
+                    statusMessage.textContent = 'File(s) chosen.';
+                    statusMessage.className = 'text-sm mt-2 text-green-600';
+                    submitButton.disabled = false;
+                    submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                } else {
+                    // 3. Invalid file type state
+                    dropZone.classList.remove('border-gray-300');
+                    dropZone.classList.add('border-red-500', 'bg-red-50');
+                    fileLabel.textContent = 'Wrong format file. Please upload PDFs only.';
+                    statusMessage.textContent = 'One or more files are not PDFs.';
+                    statusMessage.className = 'text-sm mt-2 text-red-600';
+                }
+            }
+        }
+
+        // Initial check in case of page refresh with files
+        validateFiles(fileInput.files);
+
+        // Add event listener for file selection
+        fileInput.addEventListener('change', (e) => {
+            validateFiles(fileInput.files);
+        });
+
+        // Drag/Drop visual feedback
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-gray-300', 'border-green-500', 'border-red-500');
+            dropZone.classList.add('border-blue-500');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            // On drag leave, re-run validation to show correct state
+            dropZone.classList.remove('border-blue-500');
+            validateFiles(fileInput.files);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            // Set the files to the input
+            fileInput.files = e.dataTransfer.files;
+            // Trigger the change event to run all validation logic
+            fileInput.dispatchEvent(new Event('change'));
+        });
+    });
+</script>
+{% endblock %}

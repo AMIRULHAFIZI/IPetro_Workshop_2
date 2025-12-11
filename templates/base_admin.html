@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}IPETRO Admin{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar CSS removed to match base.html */
+        
+        /* NEW CSS for the Countdown Ring - Adjusted for base.html style */
+        .countdown-ring {
+            display: inline-block;
+            width: 1rem; /* 16px */
+            height: 1rem; /* 16px */
+            border: 2px solid;
+            border-radius: 50%;
+            border-color: rgba(255, 255, 255, 0.5); /* Light color for background */
+            border-top-color: white; /* Contrast color for progress */
+            animation: spin 10s linear infinite; /* Added infinite spin animation for visual continuity with base.html style */
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-100">
+    <div class="flex h-screen">
+        
+        <nav class="w-20 bg-white shadow-lg flex flex-col">
+            <div class="h-20 flex items-center justify-center border-b-2">
+                <div class="flex items-center justify-center h-12 w-12">
+                    <img src="{{ url_for('static', filename='ipetro_logo.png') }}" alt="iPetro Logo" class="h-full w-full object-contain">
+                </div>
+            </div>
+            
+            <ul class="py-4 flex-1">
+                
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('admin_dashboard') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                            opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                            pointer-events-none">
+                            Dashboard
+                        </span>
+                    </a>
+                </li>
+                
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('admin_create_user') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="user-plus" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                            opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                            pointer-events-none">
+                            Create User
+                        </span>
+                    </a>
+                </li>
+                
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('admin_statistics') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                            opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                            pointer-events-none">
+                            Statistics
+                        </span>
+                    </a>
+                </li>
+
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('admin_announcement') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="megaphone" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                            opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                            pointer-events-none">
+                            Announcement
+                        </span>
+                    </a>
+                </li>
+
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('personal_info') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="user-cog" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                            opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                            pointer-events-none">
+                            Personal Info
+                        </span>
+                    </a>
+                </li>
+            </ul>
+            
+            <ul class="py-4">
+                <li class="px-4 py-3">
+                    <button onclick="openLogoutModal()" class="relative group flex items-center justify-center w-full text-gray-700 hover:text-red-600 rounded-lg p-3 hover:bg-red-50">
+                        <i data-lucide="log-out" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                            opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                            pointer-events-none">
+                            Log Out
+                        </span>
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <header class="h-20 bg-white border-b border-gray-200 flex items-center justify-between px-8">
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center justify-center h-12 w-12 bg-blue-100 text-blue-600 rounded-full font-bold">
+                        L1
+                    </div>
+                    <div class="flex items-center justify-center h-12 w-12 bg-gray-200 text-gray-600 rounded-full font-bold">
+                        L2
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-3">
+                    <span class="text-gray-700 font-medium">
+                        {% if current_user.is_authenticated %}
+                            {{ current_user.name or current_user.username }}
+                        {% else %}
+                            Guest
+                        {% endif %}
+                    </span>
+                    <img src="{{ url_for('static', filename='ipetro_pfp.png') }}" 
+                        alt="Profile"
+                        class="h-10 w-10 rounded-full object-cover">
+                </div>
+            </header>
+
+            <main class="flex-1 overflow-x-auto overflow-y-auto p-8"> 
+                {% block content %}{% endblock %}
+            </main>
+
+            <footer class="p-4 bg-white border-t border-gray-200 text-center">
+                <p class="text-sm text-gray-500">
+                    &copy; 2025 IPETRO. All rights reserved.
+                </p>
+            </footer>
+        </div>
+    </div>
+
+    <div class="fixed top-4 right-4 z-50 w-full max-w-sm">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert-container flex items-center justify-between transition-opacity duration-500 ease-in-out 
+                    px-4 py-3 rounded-lg shadow-xl mb-2 text-sm font-medium
+                    {% if category == 'success' %}bg-green-500 text-white{% elif category == 'error' %}bg-red-500 text-white{% else %}bg-yellow-500 text-black{% endif %}" role="alert" style="opacity: 1;">
+                    
+                    <div class="flex items-center">
+                        <span class="mr-3">{{ message }}</span>
+                        <span class="countdown-display flex items-center justify-center text-xs font-bold w-4 h-4 mr-2">
+                            </span>
+                        <span class="countdown-ring"></span>
+                    </div>
+
+                    <button class="dismiss-button bg-transparent hover:opacity-75 font-bold text-sm ml-4 p-1 rounded 
+                    {% if category == 'success' or category == 'error' %}text-white{% else %}text-black{% endif %}"> 
+                        OK
+                    </button>
+                </div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+    </div>
+
+    <div id="logout-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-sm mx-auto">
+            <div class="flex items-start">
+                <div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                    <i data-lucide="alert-triangle" class="h-6 w-6 text-red-600"></i>
+                </div>
+                <div class="ml-4 text-left">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">
+                        Log Out
+                    </h3>
+                    <div class="mt-2">
+                        <p class="text-sm text-gray-500">
+                            Are you sure you want to log out of your account?
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
+                <a href="{{ url_for('logout') }}"
+                    class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm">
+                    Log Out
+                </a>
+                <button onclick="closeLogoutModal()" type="button"
+                        class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:w-auto sm:text-sm">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    <script>
+        // These functions must be global to be called by onclick=""
+        function openLogoutModal() {
+            const logoutModal = document.getElementById('logout-modal');
+            if (logoutModal) logoutModal.classList.remove('hidden');
+        }
+        function closeLogoutModal() {
+            const logoutModal = document.getElementById('logout-modal');
+            if (logoutModal) logoutModal.classList.add('hidden');
+        }
+
+        // Function to dismiss the alert with a fade-out effect
+        function dismissAlert(alertElement) {
+            const fadeDuration = 500; // 0.5 second for the fade effect
+            // Stop the countdown if it's running (stored on the element itself)
+            if (alertElement.intervalId) {
+                clearInterval(alertElement.intervalId);
+            }
+            
+            // 1. Start the fade out effect
+            alertElement.style.opacity = '0';
+
+            // 2. After the fade, remove the element completely
+            setTimeout(() => {
+                alertElement.remove();
+            }, fadeDuration);
+        }
+
+        // Wait for the DOM to be fully loaded before running scripts
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // --- Icon Script ---
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            } else {
+                console.error('Lucide library not loaded.');
+            }
+
+            // --- Auto-Dismiss Flash Messages (with Countdown and Dismiss Button) ---
+            const alerts = document.querySelectorAll('.alert-container');
+            const initialTimeoutSeconds = 10; // The total time before auto-dismissal
+            const tickRate = 1000; // 1 second
+
+            alerts.forEach(alert => {
+                let secondsLeft = initialTimeoutSeconds;
+                
+                // Get the countdown elements
+                const countdownDisplay = alert.querySelector('.countdown-display');
+                const countdownRing = alert.querySelector('.countdown-ring');
+                const dismissButton = alert.querySelector('.dismiss-button');
+                
+                // Immediately set the initial countdown display
+                countdownDisplay.textContent = secondsLeft;
+
+                // Stop the CSS animation on the ring for a cleaner display
+                // The CSS now includes the infinite spin, we override it here to start the time-based animation
+                countdownRing.style.animation = 'none'; 
+                
+                // Countdown Logic
+                const countdown = () => {
+                    secondsLeft -= 1;
+                    
+                    if (secondsLeft >= 0) {
+                        countdownDisplay.textContent = secondsLeft;
+                    }
+
+                    if (secondsLeft <= 0) {
+                        clearInterval(alert.intervalId); // Stop the countdown
+                        dismissAlert(alert); // Auto-dismiss
+                    }
+                };
+
+                // Start the Countdown interval, storing the ID on the element
+                alert.intervalId = setInterval(countdown, tickRate);
+
+                // Start the CSS animation here using JS to control the timing precisely
+                countdownRing.style.animation = `spin ${initialTimeoutSeconds}s linear forwards`;
+                
+                // Dismiss Button Event Listener
+                dismissButton.addEventListener('click', () => {
+                    dismissAlert(alert);
+                });
+            });
+            // --- END Auto-Dismiss Flash Messages ---
+        });
+    </script>
+</body>
+</html>
