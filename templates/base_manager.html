@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}IPETRO Data Extractor{% endblock %}</title>
+    <title>{% block title %}IPETRO Manager{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,16 +13,16 @@
         body {
             font-family: 'Inter', sans-serif;
         }
-        /* New CSS for the Countdown Ring */
+        /* Custom styles for the Manager dashboard sidebar and alerts */
         .countdown-ring {
             display: inline-block;
-            width: 1rem; /* 16px */
-            height: 1rem; /* 16px */
+            width: 1rem;
+            height: 1rem;
             border: 2px solid;
             border-radius: 50%;
-            border-color: rgba(255, 255, 255, 0.5); /* Light color for background */
-            border-top-color: white; /* Contrast color for progress */
-            animation: spin 10s linear infinite; /* 10s duration matches JS timeout */
+            border-color: rgba(255, 255, 255, 0.5); 
+            border-top-color: white; 
+            animation: spin 10s linear infinite; 
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
@@ -40,56 +40,53 @@
                     <img src="{{ url_for('static', filename='ipetro_logo.png') }}" alt="iPetro Logo" class="h-full w-full object-contain">
                 </div>
             </div>
+            
             <ul class="py-4 flex-1">
+                
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('manager_dashboard') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                     opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                     pointer-events-none">
+                            Dashboard
+                        </span>
+                    </a>
+                </li>
+                
+                <li class="px-4 py-3">
+                    <a href="{{ url_for('manager_history') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="scroll-text" class="w-6 h-6"></i>
+                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
+                                     opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
+                                     pointer-events-none">
+                            Data History
+                        </span>
+                    </a>
+                </li>
 
-            {# *** MERGED: Conditional Admin/Manager Link for easy switching *** #}
-            {% if current_user.is_authenticated and current_user.role.role_name == 'Admin' %}
                 <li class="px-4 py-3">
-                    <a href="{{ url_for('admin_dashboard') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-red-600 rounded-lg p-3 hover:bg-red-50">
-                        <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
+                    <a href="{{ url_for('manager_reports') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6"></i>
                         <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
                                      opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
                                      pointer-events-none">
-                            Admin Dashboard
-                        </span>
-                    </a>
-                </li>
-            {% elif current_user.is_authenticated and current_user.role.role_name == 'Manager' %}
-                <li class="px-4 py-3">
-                    <a href="{{ url_for('manager_dashboard') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-red-600 rounded-lg p-3 hover:bg-red-50">
-                        <i data-lucide="layout-dashboard" class="w-6 h-6"></i>
-                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
-                                     opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
-                                     pointer-events-none">
-                            Manager Dashboard
-                        </span>
-                    </a>
-                </li>
-            {% endif %}
-            {# *** END MERGED *** #}
-                
-                <li class="px-4 py-3">
-                    <a href="{{ url_for('index') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
-                        <i data-lucide="upload-cloud" class="w-6 h-6"></i>
-                        <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
-                                     opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
-                                     pointer-events-none">
-                            Upload Data
+                            Reports
                         </span>
                     </a>
                 </li>
                 
                 <li class="px-4 py-3">
-                    <a href="{{ url_for('preview_page') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
-                        <i data-lucide="database" class="w-6 h-6"></i>
+                    <a href="{{ url_for('manager_review_queue') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
+                        <i data-lucide="inbox" class="w-6 h-6"></i>
                         <span class="absolute left-full ml-4 px-3 py-2 bg-gray-800 text-white text-sm rounded-md shadow-lg
                                      opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10
                                      pointer-events-none">
-                            Edit Data
+                            Review Queue
                         </span>
                     </a>
                 </li>
-                
+
                 <li class="px-4 py-3">
                     <a href="{{ url_for('notifications') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
                         <i data-lucide="bell" class="w-6 h-6"></i>
@@ -99,8 +96,8 @@
                             Notifications
                         </span>
                     </a>
-                </li> 
-
+                </li>
+                
                 <li class="px-4 py-3">
                     <a href="{{ url_for('personal_info') }}" class="relative group flex items-center justify-center text-gray-700 hover:text-blue-600 rounded-lg p-3 hover:bg-blue-50">
                         <i data-lucide="user-cog" class="w-6 h-6"></i>
@@ -133,49 +130,46 @@
                     <div class="flex items-center justify-center h-12 w-12 bg-blue-100 text-blue-600 rounded-full font-bold">L1</div>
                     <div class="flex items-center justify-center h-12 w-12 bg-gray-200 text-gray-600 rounded-full font-bold">L2</div>
                 </div>
-                
                 <div class="flex items-center space-x-3">
                     <span class="text-gray-700 font-medium">
                         {% if current_user.is_authenticated %}
-                            {{ current_user.name or current_user.username }}
+                            {{ current_user.name or current_user.username }} 
                         {% else %}
                             Guest
                         {% endif %}
                     </span>
                     <img src="{{ url_for('static', filename='ipetro_pfp.png') }}" 
-                          alt="Profile"
-                         class="h-10 w-10 rounded-full object-cover">
+                        alt="Profile"
+                        class="h-10 w-10 rounded-full object-cover">
                 </div>
-                </header>
+            </header>
 
-            <main class="flex-1 overflow-x-auto overflow-y-auto p-8">
+            <main class="flex-1 overflow-x-auto overflow-y-auto p-8"> 
                 {% block content %}{% endblock %}
             </main>
 
             <footer class="p-4 bg-white border-t border-gray-200 text-center">
-                <p class="text-sm text-gray-500">
-                    &copy; 2025 IPETRO. All rights reserved.
-                </p>
+                <p class="text-sm text-gray-500">&copy; 2025 IPETRO. All rights reserved.</p>
             </footer>
         </div>
     </div>
-
     <div class="fixed top-4 right-4 z-50 w-full max-w-sm">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
-                <div class="alert-container flex items-center justify-between auto-dismiss-alert transition-opacity duration-500 ease-in-out 
+                <div class="alert-container flex items-center justify-between transition-opacity duration-500 ease-in-out 
                     px-4 py-3 rounded-lg shadow-xl mb-2 text-sm font-medium
                     {% if category == 'success' %}bg-green-500 text-white{% elif category == 'error' %}bg-red-500 text-white{% else %}bg-yellow-500 text-black{% endif %}" role="alert" style="opacity: 1;">
                     
                     <div class="flex items-center">
                         <span class="mr-3">{{ message }}</span>
                         <span class="countdown-display flex items-center justify-center text-xs font-bold w-4 h-4 mr-2">
-                             </span>
+                            </span>
                         <span class="countdown-ring"></span>
                     </div>
 
-                    <button class="dismiss-button bg-transparent hover:opacity-75 font-bold text-sm ml-4 p-1 rounded">
+                    <button class="dismiss-button bg-transparent hover:opacity-75 font-bold text-sm ml-4 p-1 rounded 
+                    {% if category == 'success' or category == 'error' %}text-white{% else %}text-black{% endif %}"> 
                         OK
                     </button>
                 </div>
@@ -183,6 +177,7 @@
         {% endif %}
         {% endwith %}
     </div>
+
     <div id="logout-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
         <div class="bg-white rounded-lg shadow-xl p-6 max-w-sm mx-auto">
             <div class="flex items-start">
@@ -190,19 +185,13 @@
                     <i data-lucide="alert-triangle" class="h-6 w-6 text-red-600"></i>
                 </div>
                 <div class="ml-4 text-left">
-                    <h3 class="text-lg leading-6 font-medium text-gray-900">
-                        Log Out
-                    </h3>
-                    <div class="mt-2">
-                        <p class="text-sm text-gray-500">
-                            Are you sure you want to log out of your account?
-                        </p>
-                    </div>
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">Log Out</h3>
+                    <div class="mt-2"><p class="text-sm text-gray-500">Are you sure you want to log out of your account?</p></div>
                 </div>
             </div>
             <div class="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
                 <a href="{{ url_for('logout') }}"
-                   class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm">
+                    class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm">
                     Log Out
                 </a>
                 <button onclick="closeLogoutModal()" type="button"
@@ -213,7 +202,7 @@
         </div>
     </div>
     <script>
-        // These functions must be global to be called by onclick=""
+        // JS functions must be copied here
         function openLogoutModal() {
             const logoutModal = document.getElementById('logout-modal');
             if (logoutModal) logoutModal.classList.remove('hidden');
@@ -222,79 +211,43 @@
             const logoutModal = document.getElementById('logout-modal');
             if (logoutModal) logoutModal.classList.add('hidden');
         }
-
-        // Function to dismiss the alert with a fade-out effect
         function dismissAlert(alertElement) {
-            const fadeDuration = 500; // 0.5 second for the fade effect
-            // Stop the countdown if it's running
+            const fadeDuration = 500; 
             if (alertElement.intervalId) {
                 clearInterval(alertElement.intervalId);
             }
-            
-            // 1. Start the fade out effect
             alertElement.style.opacity = '0';
-
-            // 2. After the fade, remove the element completely
             setTimeout(() => {
                 alertElement.remove();
             }, fadeDuration);
         }
-
         document.addEventListener('DOMContentLoaded', () => {
-            
-            // --- Icon Script ---
             if (typeof lucide !== 'undefined') {
                 lucide.createIcons();
-            } else {
-                console.error('Lucide library not loaded.');
             }
-
-            // --- Auto-Dismiss Flash Messages (with Countdown and Dismiss Button) ---
             const alerts = document.querySelectorAll('.alert-container');
-            const initialTimeoutSeconds = 10; // The total time before auto-dismissal
-            const tickRate = 1000; // 1 second
-
+            const initialTimeoutSeconds = 10;
+            const tickRate = 1000;
             alerts.forEach(alert => {
                 let secondsLeft = initialTimeoutSeconds;
-                
-                // Get the countdown elements
                 const countdownDisplay = alert.querySelector('.countdown-display');
                 const countdownRing = alert.querySelector('.countdown-ring');
                 const dismissButton = alert.querySelector('.dismiss-button');
-                
-                // Immediately set the initial countdown display
                 countdownDisplay.textContent = secondsLeft;
-
-                // Stop the CSS animation on the ring for a cleaner display
                 countdownRing.style.animation = 'none'; 
-                
-                // Countdown Logic
                 const countdown = () => {
                     secondsLeft -= 1;
-                    
-                    if (secondsLeft >= 0) {
-                        countdownDisplay.textContent = secondsLeft;
-                    }
-
+                    if (secondsLeft >= 0) { countdownDisplay.textContent = secondsLeft; }
                     if (secondsLeft <= 0) {
-                        clearInterval(alert.intervalId); // Stop the countdown
-                        dismissAlert(alert); // Auto-dismiss
+                        clearInterval(alert.intervalId);
+                        dismissAlert(alert);
                     }
                 };
-
-                // Start the Countdown interval
                 alert.intervalId = setInterval(countdown, tickRate);
-
-                // Start the CSS animation here using JS to control the timing precisely
                 countdownRing.style.animation = `spin ${initialTimeoutSeconds}s linear forwards`;
-                
-                // Dismiss Button Event Listener
-                dismissButton.addEventListener('click', () => {
-                    dismissAlert(alert);
-                });
+                dismissButton.addEventListener('click', () => { dismissAlert(alert); });
             });
-            // --- END Auto-Dismiss Flash Messages ---
         });
     </script>
-</body>
+    </body>
 </html>
