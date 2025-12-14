@@ -4,11 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>iPetro Login</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -27,16 +24,13 @@
 <body class="bg-white">
     <div class="flex min-h-screen">
 
-        <!-- 1. Left Side: Branding & Welcome -->
         <div class="hidden md:flex md:w-1/2 bg-gradient-to-tr from-blue-600 to-blue-800 text-white p-12 flex-col justify-center items-center">
             <div class="text-center max-w-md">
                 
-                <!-- Fixed logo size to h-20 w-20 -->
                 <div class="flex items-center justify-center h-22 w-22 mx-auto mb-6">
                     <img src="{{ url_for('static', filename='ipetro_logo.png') }}" alt="iPetro Logo" class="h-full w-full object-contain">
                 </div>
 
-                <!-- Welcome Text -->
                 <h1 class="text-4xl font-bold mb-4">Welcome to iPetro</h1>
                 <p class="text-lg text-blue-100 opacity-90">
                     Streamlining your data, one drawing at a time. Please log in to access the digital automation platform.
@@ -44,11 +38,9 @@
             </div>
         </div>
 
-        <!-- 2. Right Side: Login Form -->
         <div class="w-full md:w-1/2 flex flex-col justify-center items-center p-8 sm:p-12 bg-gray-50">
             <div class="max-w-md w-full">
                 
-                <!-- Fixed mobile logo to .png -->
                 <div class="flex md:hidden items-center justify-center h-20 w-20 mx-auto mb-4">
                     <img src="{{ url_for('static', filename='ipetro_logo.png') }}" alt="iPetro Logo" class="h-full w-full object-contain">
                 </div>
@@ -57,7 +49,6 @@
                     Log In to Your Account
                 </h2>
 
-                <!-- Flash Message Block -->
                 {% with messages = get_flashed_messages(with_categories=true) %}
                   {% if messages %}
                     <div class="mb-4">
@@ -70,9 +61,7 @@
                   {% endif %}
                 {% endwith %}
 
-                <!-- Set form action to the 'login' route -->
                 <form action="{{ url_for('login') }}" method="POST">
-                    <!-- Username/Email Address -->
                     <div class="mb-4">
                         <label for="username" class="block text-sm font-medium text-gray-700 mb-2">
                             Username or Email
@@ -87,7 +76,6 @@
                         </div>
                     </div>
 
-                    <!-- Role Selection -->
                     <div class="mb-4">
                         <label for="role" class="block text-sm font-medium text-gray-700 mb-2">
                             Role
@@ -99,7 +87,7 @@
                             <select id="role" name="role"
                                    class="w-full pl-12 pr-10 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                    required>
-                                <option value="Manager">Manager</option>
+                                <option value="Admin">Admin</option> <option value="Manager">Manager</option>
                                 <option value="Engineer">Engineer</option>
                             </select>
                             <div class="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
@@ -108,7 +96,6 @@
                         </div>
                     </div>
 
-                    <!-- Password -->
                     <div class="mb-6">
                         <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
                             Password
@@ -123,14 +110,12 @@
                         </div>
                     </div>
 
-                    <!-- Forgot Password -->
                     <div class="text-right mb-6">
                         <a href="#" class="text-sm font-medium text-blue-600 hover:text-blue-500 hover:underline">
                             Forgot Password?
                         </a>
                     </div>
 
-                    <!-- Submit Button -->
                     <div>
                         <button type="submit" 
                                 class="w-full flex justify-center py-3 px-4 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
@@ -139,7 +124,6 @@
                     </div>
                 </form>
 
-                <!-- Sign Up Link -->
                 <p class="text-sm text-center text-gray-600 mt-8">
                     Don't have an account? 
                     <a href="#" class="font-medium text-blue-600 hover:text-blue-500 hover:underline">
@@ -150,7 +134,6 @@
         </div>
     </div>
 
-    <!-- Script to activate Lucide icons -->
     <script>
         lucide.createIcons();
     </script>

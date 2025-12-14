@@ -1,4 +1,10 @@
-{% extends 'base_admin.html' %}
+{% if current_user.role.role_name == 'Admin' %}
+    {% extends 'base_admin.html' %}
+{% elif current_user.role.role_name == 'Manager' %}
+    {% extends 'base_manager.html' %}
+{% else %}
+    {% extends 'base.html' %} 
+{% endif %}
 
 {% block title %}Admin Dashboard - {{ super() }}{% endblock %}
 
@@ -153,7 +159,10 @@
                                 </div>
                             </td>
                             <td class="p-3 whitespace-nowrap">
-                                {% if user.role.role_name == 'Manager' %}
+                                {% if user.role.role_name == 'Admin' %}
+                                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
+                                        {{ user.role.role_name }}
+                                {% elif user.role.role_name == 'Manager' %}
                                     <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
                                         {{ user.role.role_name }}
                                     </span>
