@@ -56,7 +56,7 @@ login_manager.login_message_category = 'error'
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
 ANNOUNCEMENT_FOLDER = 'announcements'
-POPPLER_PATH = r'C:\poppler-25.07.0\Library\bin' # Verify this path on your machine!
+POPPLER_PATH = os.environ.get('POPPLER_PATH')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
