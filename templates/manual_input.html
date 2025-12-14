@@ -1,4 +1,10 @@
-{% extends 'base.html' %}
+{% if current_user.role.role_name == 'Admin' %}
+    {% extends 'base_admin.html' %}
+{% elif current_user.role.role_name == 'Manager' %}
+    {% extends 'base_manager.html' %}
+{% else %}
+    {% extends 'base.html' %} 
+{% endif %}
 
 {% block title %}Manual Data Input - {{ super() }}{% endblock %}
 
