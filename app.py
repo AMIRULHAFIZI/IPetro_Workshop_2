@@ -177,7 +177,7 @@ def init_db(drop):
         manager = User(username='manager@ipetro.com', name='Manager', email='manager@ipetro.com', role_id=m.role_id) 
         manager.set_password('abc1234')
         
-        eng = User(username='engineer@ipetro.com', name='Eng', email='engineer@ipetro.com', role_id=e.role_id)
+        eng = User(username='engineer@ipetro.com', name='Engineer', email='engineer@ipetro.com', role_id=e.role_id)
         eng.set_password('abc1234')
         
         db.session.add_all([admin, manager, eng]) 
