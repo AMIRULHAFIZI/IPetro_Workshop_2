@@ -1,10 +1,4 @@
-{% if current_user.role.role_name == 'Admin' %}
-    {% extends 'base_admin.html' %}
-{% elif current_user.role.role_name == 'Manager' %}
-    {% extends 'base_manager.html' %}
-{% else %}
-    {% extends 'base.html' %} 
-{% endif %}
+{% extends 'base_admin.html' %}
 
 {% block title %}Admin Dashboard - {{ super() }}{% endblock %}
 

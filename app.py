@@ -3,6 +3,7 @@ import re
 import json
 import click
 import uuid 
+import time
 from flask import Flask, request, render_template, send_from_directory, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -41,7 +42,7 @@ if not GEMINI_API_KEY:
 # --- APP SETUP ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'a-super-secret-key-that-is-hard-to-guess'
-app.config['SQLALCHEMY_SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -191,7 +192,8 @@ class AnnouncementForm(FlaskForm):
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or current_user.role.role_name != 'Manager':
+        # FIX: Allow BOTH 'Manager' and 'Admin' roles
+        if not current_user.is_authenticated or current_user.role.role_name not in ['Manager', 'Admin']:
             flash('Permission denied.', 'error')
             return redirect(url_for('index'))
         return f(*args, **kwargs)
@@ -336,14 +338,26 @@ def parse_gemini_response(json_text, drawing_name):
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
+    # 1. If already logged in, redirect based on role
     if current_user.is_authenticated:
-        return redirect(url_for('admin_dashboard') if current_user.role.role_name == 'Manager' else url_for('index'))
+        if current_user.role.role_name in ['Admin', 'Manager']:
+            return redirect(url_for('admin_dashboard'))
+        else:
+            return redirect(url_for('index'))
     
+    # 2. Handle Login Form Submission
     if request.method == 'POST':
         user = User.query.filter((User.username == request.form.get('username')) | (User.email == request.form.get('username'))).first()
         if user and user.check_password(request.form.get('password')) and user.role.role_name.lower() == request.form.get('role').lower():
             login_user(user)
-            return redirect(url_for('admin_dashboard') if user.role.role_name == 'Manager' else url_for('index'))
+            
+            # --- FIX IS HERE: Redirect Admins/Managers to Dashboard, others to Index ---
+            if user.role.role_name in ['Admin', 'Manager']:
+                return redirect(url_for('admin_dashboard'))
+            else:
+                return redirect(url_for('index'))
+            # ---------------------------------------------------------------------------
+            
         flash('Invalid credentials.', 'error')
     return render_template('login.html')
 
@@ -361,45 +375,74 @@ def index():
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload_file():
-    if 'drawings' not in request.files: return redirect(url_for('index'))
+    # 1. Basic validation
+    if 'drawings' not in request.files:
+        flash("No file part", "error")
+        return redirect(url_for('index'))
+    
     files = request.files.getlist('drawings')
-    if not files or files[0].filename == '': return redirect(url_for('index'))
+    
+    print(f"DEBUG: System received {len(files)} files.") 
+    
+    if not files or files[0].filename == '':
+        flash("No selected file", "error")
+        return redirect(url_for('index'))
     
     files.sort(key=lambda x: x.filename)
-    all_data = []
+    all_data = [] 
     
     try:
-        for file in files:
-            if file.filename == '': continue
+        # 2. Process each file
+        for index, file in enumerate(files):
+            if file.filename == '': 
+                continue
+            
             safe_name = secure_filename(file.filename)
             path = os.path.join(app.config['UPLOAD_FOLDER'], safe_name)
             file.save(path)
             
+            print(f"--- Processing File {index + 1}/{len(files)}: {safe_name} ---")
+
             try:
-                images = pdf2image.convert_from_path(path, poppler_path=POPPLER_PATH)
+                # Convert PDF to Image & Call Gemini
+                images = pdf2image.convert_from_path(path, poppler_path=app.config.get('POPPLER_PATH') or POPPLER_PATH)
                 text = call_gemini_api(images, get_gemini_prompt(), GEMINI_API_KEY)
                 clean_text = clean_gemini_response(text)
                 
-                with open(os.path.join(app.config['OUTPUT_FOLDER'], f'gemini_{safe_name}.json'), 'w') as f:
-                    f.write(clean_text)
-                
+                # Parse and Append
                 parsed = parse_gemini_response(clean_text, safe_name)
-                all_data.extend(parsed)
+                
+                if parsed:
+                    all_data.extend(parsed) 
+                    print(f"DEBUG: Successfully extracted {len(parsed)} rows from {safe_name}")
+                else:
+                    print(f"DEBUG: AI returned empty data for {safe_name}")
+
+                # --- WAIT FOR GOOGLE SERVERS ---
+                if index < len(files) - 1:
+                    print("Waiting 20 seconds for API cooldown...")
+                    sleep_time.sleep(20)  # <--- THIS IS THE FIX
+                # -----------------------------
+
             except Exception as e:
-                print(f"Error file {safe_name}: {e}")
-                continue
+                print(f"CRITICAL ERROR processing file {safe_name}: {e}")
+                continue 
         
+        # 3. Check if we got any data
         if not all_data:
-            flash("No data extracted.", "error")
+            flash("No data could be extracted. Check terminal for errors.", "error")
             return redirect(url_for('index'))
             
-        temp_name = f"temp_{uuid.uuid4()}.json"
+        # 4. Save
+        print(f"DEBUG: Final saving. Total rows collected: {len(all_data)}")
+        temp_name = f"temp_{uuid.uuid4().hex}.json"
         with open(os.path.join(app.config['OUTPUT_FOLDER'], temp_name), 'w') as f:
             json.dump(all_data, f)
             
         return redirect(url_for('preview_data', temp_file=temp_name))
+
     except Exception as e:
-        flash(f"Error: {e}", "error")
+        flash(f"System Error: {e}", "error")
         return redirect(url_for('index'))
 
 @app.route('/preview')
@@ -425,7 +468,7 @@ def preview_data(temp_file):
                 curr_drawing = d['source_drawing']
             
             row = {
-                'NO.': row_count,
+                'NO.': equip_count,
                 'EQUIPMENT NO. ': f"V-{equip_count:03d}",
                 'PMT NO.': os.path.splitext(d['source_drawing'])[0],
                 'EQUIPMENT DESCRIPTION': "",
@@ -697,6 +740,30 @@ def admin_announcement():
         return redirect(url_for('admin_announcement'))
     return render_template('announcement.html', form=form, announcements=Announcement.query.order_by(Announcement.created_at.desc()).all())
 
+@app.route('/admin/history')
+@login_required
+@admin_required
+def admin_history():
+    # Fetch all history records, newest first
+    items = History.query.order_by(History.created_at.desc()).all()
+    return render_template('history_admin.html', histories=items)
+
+@app.route('/admin/reports')
+@login_required
+@admin_required
+def admin_reports():
+    # Placeholder for future Reports functionality
+    flash("The Reports module is currently under construction.", "info")
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/review-queue')
+@login_required
+@admin_required
+def admin_review_queue():
+    # Placeholder for future Review Queue functionality
+    flash("The Review Queue module is currently under construction.", "info")
+    return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin/statistics')
 @login_required
 @admin_required
@@ -712,15 +779,31 @@ def init_db(drop):
     if drop: db.drop_all()
     db.create_all()
     if not Role.query.first():
-        m = Role(role_name='Manager'); e = Role(role_name='Engineer')
-        db.session.add_all([m, e])
+        # 1. Create Roles
+        m = Role(role_name='Manager')
+        e = Role(role_name='Engineer')
+        a = Role(role_name="Admin")
+        db.session.add_all([m, e, a])
         db.session.commit()
-        admin = User(username='manager@ipetro.com', name='Admin', email='manager@ipetro.com', role_id=m.role_id)
-        admin.set_password('abc1234')
-        eng = User(username='engineer@ipetro.com', name='Eng', email='engineer@ipetro.com', role_id=e.role_id)
-        eng.set_password('abc1234')
-        db.session.add_all([admin, eng])
+        
+        # 2. Create Users (With CORRECT variable names)
+        
+        # Manager
+        manager_user = User(username='manager@ipetro.com', name='Manager', email='manager@ipetro.com', role_id=m.role_id)
+        manager_user.set_password('abc1234')
+        
+        # Engineer
+        eng_user = User(username='engineer@ipetro.com', name='Eng', email='engineer@ipetro.com', role_id=e.role_id)
+        eng_user.set_password('abc1234')
+        
+        # Admin
+        admin_user = User(username='admin@ipetro.com', name='Admin', email='Admin@ipetro.com', role_id=a.role_id)
+        admin_user.set_password('abc1234')
+        
+        # 3. Add all unique variables to session
+        db.session.add_all([manager_user, eng_user, admin_user])
         db.session.commit()
+        
     print("DB Initialized.")
 
 if __name__ == '__main__':

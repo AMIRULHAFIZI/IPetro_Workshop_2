@@ -1,180 +1,229 @@
 {% extends "base.html" %}
 
-{% block title %}Extracted Data Preview{% endblock %}
+{% block title %}Preview Data{% endblock %}
 
 {% block head %}
-    <!-- Specific styles for the preview page -->
-    <style>
-        /* Basic table styling */
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            font-size: 10px; /* Smaller font for dense data */
-        }
-        th, td {
-            border: 1px solid #9ca3af; /* gray-400 */
-            padding: 4px 6px;
-            text-align: center;
-        }
-        th {
-            background-color: #f3f4f6; /* gray-100 */
-            font-weight: bold;
-            vertical-align: middle;
-        }
-        /* Style for editable inputs */
-        input[type="text"] {
-            width: 100%;
-            padding: 4px;
-            border: 1px solid #d1d5db; /* gray-300 */
-            border-radius: 4px;
-            font-size: 10px;
-        }
-        input[type="text"]:focus {
-            outline: 2px solid #3b82f6; /* blue-500 */
-            border-color: transparent;
-        }
-        /* Header rows */
-        .header-row-1 th { background-color: #dbeafe; /* blue-100 */ }
-        .header-row-2 th { background-color: #bfdbfe; /* blue-200 */ }
-        .header-row-3 th { background-color: #93c5fd; /* blue-300 */ }
-    </style>
+<style>
+    /* Smooth transition for fading between tables */
+    .drawing-section {
+        transition: opacity 0.3s ease-in-out;
+    }
+    .hidden-section {
+        display: none;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="container mx-auto max-w-7xl bg-white shadow-lg rounded-lg p-6">
+<datalist id="parts_options">
+    <option value="Tube Bundle">
+    <option value="Shell">
+    <option value="Channel">
+    <option value="Bottom Channel">
+    <option value="Top Channel">
+    <option value="Head">
+    <option value="Top Head">
+    <option value="Bottom Head">
+</datalist>
 
-    <div class="mb-6 text-center">
-        <h1 class="text-2xl font-bold text-gray-800">MASTERFILE EQUIPMENT</h1>
-        <p class="text-lg text-gray-600">TOTAL NO. OF EQUIPMENT: {{ equipment_count }} EQUIPMENTS</p>
-    </div>
-    
-    <!-- NEW: Instructional Text -->
-    <div class="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 rounded-lg" role="alert">
-        <p class="font-semibold text-base">Review Required</p>
-        <p class="text-sm">Please **edit and confirm your data** before proceeding to the next step. Use the "View Original Drawing" button below for reference.</p>
-    </div>
-    
-    <!-- Flash Messages -->
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="mb-4">
-        {% for category, message in messages %}
-          <div class="{% if category == 'success' %} bg-green-100 border-green-400 text-green-700 {% else %} bg-red-100 border-red-400 text-red-700 {% endif %} border px-4 py-3 rounded relative" role="alert">
-            <span class="block sm:inline">{{ message }}</span>
-          </div>
-        {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+<datalist id="equipment_desc_options">
+    <option value="Air Receiver">
+    <option value="Expansion Tank">
+    <option value="Condensate Vessel">
+    <option value="Hot Water System">
+    <option value="Absorber for Neutralization of Acid Gases">
+    <option value="Thermal Deaerator">
+    <option value="Cooling of Steam- Gas Mix at The Exit of the Reactor">
+    <option value="Gas Scrubber Cooler">
+    <option value="Cooling of Water on Irrigation of An Absorber">
+    <option value="Reflux Condensor of Drying Tower">
+</datalist>
 
-    <form action="{{ url_for('save_data') }}" method="POST">
-        <!-- Hidden field for tracking which temp file this data came from -->
-        {% if temp_file %}
-        <input type="hidden" name="temp_file" value="{{ temp_file }}">
-        {% endif %}
-
-        <!-- NEW: View Original Drawing Button -->
-        {% if data_rows %}
-            {% set drawing_name = data_rows[0]['source_drawing'] %}
-            <div class="mb-4 flex justify-end">
-                <a href="{{ url_for('view_uploaded_file', filename=drawing_name) }}" target="_blank"
-                   class="inline-block px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition duration-300 text-sm">
-                    View Original Drawing ({{ drawing_name }})
-                </a>
+<div class="max-w-[95%] mx-auto py-8">
+    {% if excel_file %}
+    <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-8 shadow-lg flex flex-col md:flex-row items-center justify-between animate-fade-in-down">
+        <div class="flex items-center mb-4 md:mb-0">
+            <div class="bg-green-100 p-3 rounded-full mr-4">
+                <i data-lucide="check-circle-2" class="w-8 h-8 text-green-600"></i>
             </div>
-        {% endif %}
-
-        <!-- Editable Table -->
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
-                <thead class="bg-gray-100">
-                    <tr class="header-row-1">
-                        <th rowspan="3">NO.</th>
-                        <th rowspan="3">EQUIPMENT NO. </th>
-                        <th rowspan="3">PMT NO.</th>
-                        <th rowspan="3">EQUIPMENT DESCRIPTION</th>
-                        <th rowspan="3">PARTS</th>
-                        <th rowspan="3">PHASE</th>
-                        <th rowspan="3">FLUID</th>
-                        <th colspan="3">MATERIAL INFORMATION</th>
-                        <th rowspan="3">INSULATION</th>
-                        <th colspan="2">DESIGN</th>
-                        <th colspan="2">OPERATING</th>
-                    </tr>
-                    <tr class="header-row-2">
-                        <th rowspan="2">TYPE</th>
-                        <th rowspan="2">SPEC.</th>
-                        <th rowspan="2">GRADE</th>
-                        <th colspan="2"></th>
-                        <th colspan="2"></th>
-                    </tr>
-                    <tr class="header-row-3">
-                        <th>TEMP. (°C) </th>
-                        <th>PRESSURE (Mpa) </th>
-                        <th>TEMP. (°C)</th>
-                        <th>PRESSURE (Mpa)</th>
-                    </tr>
-                </thead>
-                
-                <tbody id="data-preview-body">
-                    
-                    <!-- Loop through data and create editable input fields -->
-                    {% for row in data_rows %}
-                    <tr>
-                        <!-- Hidden field to pass back the original drawing name -->
-                        <input type="hidden" name="source_drawing" value="{{ row['source_drawing'] }}">
-
-                        <!-- 
-                          *** THIS IS THE FIX ***
-                          Use the 'NO.' from the data row if it exists, otherwise use the loop index.
-                        -->
-                        <td><input type="text" name="NO." value="{{ row['NO.'] or loop.index }}"></td>
-                        
-                        <td><input type="text" name="EQUIPMENT NO. " value="{{ row['EQUIPMENT NO. '] }}"></td>
-                        <td><input type="text" name="PMT NO." value="{{ row['PMT NO.'] }}"></td>
-                        <td><input type="text" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}"></td>
-                        <td><input type="text" name="PARTS" value="{{ row['PARTS'] }}"></td>
-                        <td><input type="text" name="PHASE" value="{{ row['PHASE'] }}"></td>
-                        <td><input type="text" name="FLUID" value="{{ row['FLUID'] }}"></td>
-                        <td><input type="text" name="TYPE" value="{{ row['TYPE'] }}"></td>
-                        <td><input type="text" name="SPEC." value="{{ row['SPEC.'] }}"></td>
-                        <td><input type="text" name="GRADE" value="{{ row['GRADE'] }}"></td>
-                        <td><input type="text" name="INSULATION" value="{{ row['INSULATION'] }}"></td>
-                        <td><input type="text" name="TEMP. (°C) " value="{{ row['TEMP. (°C) '] }}"></td>
-                        <td><input type="text" name="PRESSURE (Mpa) " value="{{ row['PRESSURE (Mpa) '] }}"></td>
-                        <td><input type="text" name="TEMP. (°C)" value="{{ row['TEMP. (°C)'] }}"></td>
-                        <td><input type="text" name="PRESSURE (Mpa)" value="{{ row['PRESSURE (Mpa)'] }}"></td>
-                    </tr>
-                    {% endfor %}
-                    
-                    {% if not data_rows %}
-                    <!-- Placeholder row if no data -->
-                    <tr>
-                        <td colspan="15" class="text-center text-gray-500 py-4">No data extracted. Upload files to begin.</td>
-                    </tr>
-                    {% endif %}
-                    
-                </tbody>
-            </table>
+            <div>
+                <h2 class="text-xl font-bold text-gray-800">Processing Complete!</h2>
+                <p class="text-gray-600">Your data has been saved and merged into the Excel template.</p>
+            </div>
         </div>
-
-        <!-- Action Buttons (at the bottom) -->
-        <div class="mt-6 flex space-x-4">
-            {% if not excel_file %}
-            <button type="submit"
-                class="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-300">
-                Finish & Save
+        
+        <a href="{{ url_for('download_file', filename=excel_file) }}" 
+           class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-md transition-all transform hover:scale-105 flex items-center">
+            <i data-lucide="download" class="w-5 h-5 mr-2"></i>
+            Download Final Excel
+        </a>
+    </div>
+    {% endif %}
+    ```
+    
+    <div class="mb-6 flex justify-between items-end">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800">Data Preview & Edit</h1>
+            <p class="text-gray-600 mt-1">Review extracted data before saving.</p>
+        </div>
+        
+        <div class="flex items-center space-x-4 bg-white p-2 rounded-lg shadow-sm border border-gray-200">
+            <button type="button" onclick="changeDrawing(-1)" id="prev-btn" 
+                    class="px-4 py-2 bg-gray-100 text-gray-600 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                <i data-lucide="chevron-left" class="w-4 h-4 mr-1"></i> Previous
             </button>
-            {% endif %}
+            
+            <span class="text-sm font-semibold text-gray-700 w-32 text-center" id="page-indicator">
+                Drawing 1 of ?
+            </span>
 
-            {% if excel_file %}
-            <a href="{{ url_for('download_file', filename=excel_file) }}"
-                class="inline-block px-6 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-300">
-                Download Compiled Excel File
-            </a>
-            {% endif %}
+            <button type="button" onclick="changeDrawing(1)" id="next-btn"
+                    class="px-4 py-2 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                Next <i data-lucide="chevron-right" class="w-4 h-4 ml-1"></i>
+            </button>
         </div>
+    </div>
 
-    </form>
+    <form action="{{ url_for('save_data') }}" method="POST" id="data-form">
+        <input type="hidden" name="temp_file" value="{{ temp_file }}">
+
+        {% set grouped_data = data_rows|groupby('source_drawing') %}
+        
+        <input type="hidden" id="total-drawings" value="{{ grouped_data|length }}">
+
+        {% for drawing, items in grouped_data %}
+        <div id="drawing-{{ loop.index0 }}" class="drawing-section {% if loop.index0 != 0 %}hidden-section{% endif %}">
+            
+            <div class="bg-blue-600 text-white px-6 py-3 rounded-t-lg flex items-center shadow-md">
+                <i data-lucide="file-text" class="w-5 h-5 mr-2"></i>
+                <h2 class="text-lg font-semibold tracking-wide">{{ drawing }}</h2>
+                <span class="ml-auto text-blue-100 text-sm bg-blue-700 px-2 py-1 rounded">
+                    {{ items|length }} Rows
+                </span>
+            </div>
+
+            <div class="overflow-x-auto bg-white shadow-md rounded-b-lg border border-gray-200 mb-8">
+                <table class="min-w-full divide-y divide-gray-300">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-12">No.</th>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Equip No.</th>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">PMT No.</th>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-48">Description</th>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-40">Part Name</th>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Phase</th>
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Fluid</th>
+                            
+                            <th class="px-3 py-3 text-center text-xs font-bold text-white bg-gray-500 uppercase tracking-wider" colspan="3">Material Info</th>
+                            
+                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Insulation</th>
+                            
+                            <th class="px-3 py-3 text-center text-xs font-bold text-white bg-blue-500 uppercase tracking-wider" colspan="2">Design</th>
+                            
+                            <th class="px-3 py-3 text-center text-xs font-bold text-white bg-green-600 uppercase tracking-wider" colspan="2">Operating</th>
+                        </tr>
+                        <tr class="bg-gray-100">
+                            <th colspan="7"></th>
+                            
+                            <th class="px-2 py-1 text-xs font-semibold text-gray-600 border-l">Type</th>
+                            <th class="px-2 py-1 text-xs font-semibold text-gray-600">Spec</th>
+                            <th class="px-2 py-1 text-xs font-semibold text-gray-600 border-r">Grade</th>
+                            
+                            <th></th>
+                            
+                            <th class="px-2 py-1 text-xs font-semibold text-blue-800 border-l">Temp (°C)</th>
+                            <th class="px-2 py-1 text-xs font-semibold text-blue-800 border-r">Press (Mpa)</th>
+                            
+                            <th class="px-2 py-1 text-xs font-semibold text-green-800 border-l">Temp (°C)</th>
+                            <th class="px-2 py-1 text-xs font-semibold text-green-800">Press (Mpa)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for row in items %}
+                        <tr class="hover:bg-blue-50 transition-colors">
+                            <input type="hidden" name="source_drawing" value="{{ row['source_drawing'] }}">
+
+                            <td class="px-2 py-2"><input type="text" name="NO." value="{{ row['NO.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <td class="px-2 py-2"><input type="text" name="EQUIPMENT NO. " value="{{ row['EQUIPMENT NO. '] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-bold text-blue-700"></td>
+                            <td class="px-2 py-2"><input type="text" name="PMT NO." value="{{ row['PMT NO.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td> 
+                            <td class="px-2 py-2"><input type="text" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}" list="equipment_desc_options" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500" placeholder="Type or Select"></td>
+                            <td class="px-2 py-2"><input type="text" name="PARTS" value="{{ row['PARTS'] }}" list="parts_options" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-medium" placeholder="Type or Select"></td>
+                            <td class="px-2 py-2"><input type="text" name="PHASE" value="{{ row['PHASE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <td class="px-2 py-2"><input type="text" name="FLUID" value="{{ row['FLUID'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            
+                            <td class="px-2 py-2 border-l"><input type="text" name="TYPE" value="{{ row['TYPE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <td class="px-2 py-2"><input type="text" name="SPEC." value="{{ row['SPEC.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <td class="px-2 py-2 border-r"><input type="text" name="GRADE" value="{{ row['GRADE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            
+                            <td class="px-2 py-2"><input type="text" name="INSULATION" value="{{ row['INSULATION'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            
+                            <td class="px-2 py-2 border-l bg-blue-50/30"><input type="text" name="TEMP. (°C) " value="{{ row['TEMP. (°C) '] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            <td class="px-2 py-2 border-r bg-blue-50/30"><input type="text" name="PRESSURE (Mpa) " value="{{ row['PRESSURE (Mpa) '] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            
+                            <td class="px-2 py-2 border-l bg-green-50/30"><input type="text" name="TEMP. (°C)" value="{{ row['TEMP. (°C)'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            <td class="px-2 py-2 bg-green-50/30"><input type="text" name="PRESSURE (Mpa)" value="{{ row['PRESSURE (Mpa)'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+
+        <div class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-4 shadow-lg z-50">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+                <a href="{{ url_for('index') }}" class="text-gray-600 hover:text-red-600 text-sm font-medium">Cancel & Discard</a>
+                
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-500 mr-2">
+                        Total Equipment Count: <span class="font-bold text-gray-800">{{ equipment_count }}</span>
+                    </span>
+                    <button type="submit" class="bg-green-600 text-white px-8 py-2 rounded-md font-bold hover:bg-green-700 shadow-md transition-colors flex items-center">
+                        <i data-lucide="save" class="w-4 h-4 mr-2"></i> Save to Database & Excel
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="h-20"></div> </form>
 </div>
+
+<script>
+    let currentIndex = 0;
+    const totalDrawings = parseInt(document.getElementById('total-drawings').value);
+
+    function updateView() {
+        // 1. Hide all sections
+        for (let i = 0; i < totalDrawings; i++) {
+            const el = document.getElementById(`drawing-${i}`);
+            if (el) el.classList.add('hidden-section');
+        }
+
+        // 2. Show current section
+        const currentEl = document.getElementById(`drawing-${currentIndex}`);
+        if (currentEl) currentEl.classList.remove('hidden-section');
+
+        // 3. Update Buttons
+        document.getElementById('prev-btn').disabled = (currentIndex === 0);
+        document.getElementById('next-btn').disabled = (currentIndex === totalDrawings - 1);
+
+        // 4. Update Indicator
+        document.getElementById('page-indicator').innerText = `Drawing ${currentIndex + 1} of ${totalDrawings}`;
+        
+        // Scroll to top of table
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function changeDrawing(direction) {
+        const newIndex = currentIndex + direction;
+        if (newIndex >= 0 && newIndex < totalDrawings) {
+            currentIndex = newIndex;
+            updateView();
+        }
+    }
+
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', () => {
+        updateView();
+    });
+</script>
 {% endblock %}
