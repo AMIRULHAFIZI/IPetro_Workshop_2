@@ -11,20 +11,17 @@
     .hidden-section {
         display: none;
     }
+    /* Ensure the merged textarea looks good */
+    .merged-textarea {
+        resize: none; 
+        height: 100%; 
+        min-height: 60px;
+        background-color: #fff;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<datalist id="parts_options">
-    <option value="Tube Bundle">
-    <option value="Shell">
-    <option value="Channel">
-    <option value="Bottom Channel">
-    <option value="Top Channel">
-    <option value="Head">
-    <option value="Top Head">
-    <option value="Bottom Head">
-</datalist>
 
 <datalist id="equipment_desc_options">
     <option value="Air Receiver">
@@ -40,6 +37,7 @@
 </datalist>
 
 <div class="max-w-[95%] mx-auto py-8">
+    
     {% if excel_file %}
     <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-8 shadow-lg flex flex-col md:flex-row items-center justify-between animate-fade-in-down">
         <div class="flex items-center mb-4 md:mb-0">
@@ -52,14 +50,21 @@
             </div>
         </div>
         
-        <a href="{{ url_for('download_file', filename=excel_file) }}" 
-           class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-md transition-all transform hover:scale-105 flex items-center">
-            <i data-lucide="download" class="w-5 h-5 mr-2"></i>
-            Download Final Excel
-        </a>
+        <div class="flex space-x-3">
+            <a href="{{ url_for('download_file', filename=excel_file) }}" 
+               class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-all transform hover:scale-105 flex items-center">
+                <i data-lucide="sheet" class="w-5 h-5 mr-2"></i>
+                Download Excel
+            </a>
+
+            <a href="{{ url_for('generate_ppt', filename=excel_file) }}" 
+               class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-all transform hover:scale-105 flex items-center">
+                <i data-lucide="presentation" class="w-5 h-5 mr-2"></i>
+                Generate PPT
+            </a>
+        </div>
     </div>
     {% endif %}
-    ```
     
     <div class="mb-6 flex justify-between items-end">
         <div>
@@ -92,6 +97,7 @@
         <input type="hidden" id="total-drawings" value="{{ grouped_data|length }}">
 
         {% for drawing, items in grouped_data %}
+        {% set parent_loop = loop %} 
         <div id="drawing-{{ loop.index0 }}" class="drawing-section {% if loop.index0 != 0 %}hidden-section{% endif %}">
             
             <div class="bg-blue-600 text-white px-6 py-3 rounded-t-lg flex items-center shadow-md">
@@ -109,7 +115,7 @@
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-12">No.</th>
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Equip No.</th>
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">PMT No.</th>
-                            <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-48">Description</th>
+                            <th class="px-3 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-48">Description</th>
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-40">Part Name</th>
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Phase</th>
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Fluid</th>
@@ -145,9 +151,60 @@
 
                             <td class="px-2 py-2"><input type="text" name="NO." value="{{ row['NO.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
                             <td class="px-2 py-2"><input type="text" name="EQUIPMENT NO. " value="{{ row['EQUIPMENT NO. '] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-bold text-blue-700"></td>
-                            <td class="px-2 py-2"><input type="text" name="PMT NO." value="{{ row['PMT NO.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td> 
-                            <td class="px-2 py-2"><input type="text" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}" list="equipment_desc_options" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500" placeholder="Type or Select"></td>
-                            <td class="px-2 py-2"><input type="text" name="PARTS" value="{{ row['PARTS'] }}" list="parts_options" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-medium" placeholder="Type or Select"></td>
+                            
+                            <td class="px-2 py-2">
+                                <input type="text" name="PMT NO." value="{{ row['PMT NO.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
+                                {% if not loop.first %}
+                                <input type="hidden" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}" class="sync-desc-{{ parent_loop.index0 }}">
+                                {% endif %}
+                            </td>
+                            
+                            {% if loop.first %}
+                            <td class="px-2 py-2 bg-white" rowspan="{{ items|length }}" style="vertical-align: middle;">
+                                <div class="flex flex-col h-full space-y-1">
+                                    <select onchange="updateTextarea(this, '{{ parent_loop.index0 }}')" 
+                                            class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-gray-600 bg-gray-50">
+                                        <option value="" disabled selected>▼ Quick Select...</option>
+                                        <option value="Air Receiver">Air Receiver</option>
+                                        <option value="Expansion Tank">Expansion Tank</option>
+                                        <option value="Condensate Vessel">Condensate Vessel</option>
+                                        <option value="Hot Water System">Hot Water System</option>
+                                        <option value="Absorber for Neutralization of Acid Gases">Absorber for Neutralization of Acid Gases</option>
+                                        <option value="Thermal Deaerator">Thermal Deaerator</option>
+                                        <option value="Cooling of Steam- Gas Mix at The Exit of the Reactor">Cooling of Steam- Gas Mix...</option>
+                                        <option value="Gas Scrubber Cooler">Gas Scrubber Cooler</option>
+                                        <option value="Cooling of Water on Irrigation of An Absorber">Cooling of Water on Irrigation...</option>
+                                        <option value="Reflux Condensor of Drying Tower">Reflux Condensor of Drying Tower</option>
+                                    </select>
+                                    <textarea name="EQUIPMENT DESCRIPTION" 
+                                           id="desc-textarea-{{ parent_loop.index0 }}"
+                                           class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center font-semibold merged-textarea flex-1 p-2"
+                                           placeholder="Type manually or use select above..."
+                                           oninput="syncDescription(this, '{{ parent_loop.index0 }}')">{{ row['EQUIPMENT DESCRIPTION'] }}</textarea>
+                                </div>
+                            </td>
+                            {% endif %}
+                            
+                            <td class="px-2 py-2">
+                                <div class="flex shadow-sm rounded-md h-8">
+                                    <input type="text" name="PARTS" value="{{ row['PARTS'] }}" 
+                                           class="flex-1 w-full text-xs border-gray-300 rounded-l-md focus:ring-blue-500 focus:border-blue-500 font-medium z-10" 
+                                           placeholder="Type...">
+                                    
+                                    <select onchange="this.previousElementSibling.value = this.value; this.selectedIndex = 0;"
+                                            class="w-8 text-xs border-l-0 border-gray-300 bg-gray-100 rounded-r-md focus:ring-blue-500 focus:border-blue-500 p-0 text-center text-gray-600 cursor-pointer hover:bg-gray-200">
+                                        <option value="" disabled selected>▼</option>
+                                        <option value="Top Head">Top Head</option>
+                                        <option value="Shell">Shell</option>
+                                        <option value="Bottom Head">Bottom Head</option>
+                                        <option value="Head">Head</option>
+                                        <option value="Top Channel">Top Channel</option>
+                                        <option value="Bottom Channel">Bottom Channel</option>
+                                        <option value="Channel">Channel</option>
+                                    </select>
+                                </div>
+                            </td>
+                            
                             <td class="px-2 py-2"><input type="text" name="PHASE" value="{{ row['PHASE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
                             <td class="px-2 py-2"><input type="text" name="FLUID" value="{{ row['FLUID'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
                             
@@ -191,25 +248,35 @@
     let currentIndex = 0;
     const totalDrawings = parseInt(document.getElementById('total-drawings').value);
 
+    // Sync merged description
+    function syncDescription(masterInput, drawingIndex) {
+        const hiddenInputs = document.querySelectorAll(`.sync-desc-${drawingIndex}`);
+        hiddenInputs.forEach(input => {
+            input.value = masterInput.value;
+        });
+    }
+
+    // Dropdown helper for Description
+    function updateTextarea(selectElement, drawingIndex) {
+        const textarea = document.getElementById(`desc-textarea-${drawingIndex}`);
+        textarea.value = selectElement.value;
+        syncDescription(textarea, drawingIndex);
+        selectElement.selectedIndex = 0;
+    }
+
+    // Standard View Switching Logic
     function updateView() {
-        // 1. Hide all sections
         for (let i = 0; i < totalDrawings; i++) {
             const el = document.getElementById(`drawing-${i}`);
             if (el) el.classList.add('hidden-section');
         }
-
-        // 2. Show current section
         const currentEl = document.getElementById(`drawing-${currentIndex}`);
         if (currentEl) currentEl.classList.remove('hidden-section');
 
-        // 3. Update Buttons
         document.getElementById('prev-btn').disabled = (currentIndex === 0);
         document.getElementById('next-btn').disabled = (currentIndex === totalDrawings - 1);
-
-        // 4. Update Indicator
         document.getElementById('page-indicator').innerText = `Drawing ${currentIndex + 1} of ${totalDrawings}`;
         
-        // Scroll to top of table
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -221,7 +288,6 @@
         }
     }
 
-    // Initialize on load
     document.addEventListener('DOMContentLoaded', () => {
         updateView();
     });

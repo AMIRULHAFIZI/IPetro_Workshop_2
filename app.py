@@ -4,7 +4,10 @@ import json
 import click
 import uuid 
 import time
-from flask import Flask, request, render_template, send_from_directory, redirect, url_for, flash
+import copy
+import io
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from flask import Flask, request, render_template, send_from_directory, send_file, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -32,6 +35,9 @@ from email_validator import validate_email, EmailNotValidError
 from flask_wtf.file import FileField, FileAllowed
 from werkzeug.utils import secure_filename
 from functools import wraps
+from pptx import Presentation
+from pptx.util import Pt
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 # --- LOAD API KEY ---
 load_dotenv()
@@ -78,6 +84,363 @@ template_column_order = [
     'TEMP. (°C)', 'PRESSURE (Mpa)' 
 ]
 
+def replace_text_exact(slide, search_str, new_str):
+    """
+    Searches for specific text in all text boxes and replaces it.
+    """
+    for shape in slide.shapes:
+        if shape.has_text_frame:
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    if search_str in run.text:
+                        run.text = run.text.replace(search_str, str(new_str))
+
+# ==================== ROUTES ==================
+
+# ==================== HELPER FUNCTIONS ==================
+
+def _set_cell_text(cell, text, font_size=10):
+    """
+    Helper to set text in a table cell with specific font size and alignment.
+    """
+    # 1. Clean the text
+    if text is None:
+        text = "-"
+    
+    text_str = str(text).strip()
+    
+    if text_str == '' or text_str.lower() == 'nan':
+        text_str = "-"
+        
+    # 2. Set the text
+    cell.text_frame.text = text_str
+    
+    # 3. Apply styling to every paragraph in the cell
+    for paragraph in cell.text_frame.paragraphs:
+        paragraph.font.size = Pt(font_size)
+        paragraph.font.name = 'Arial'  # Standard font
+        
+    # 4. Center vertically
+    cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+def add_new_row(table):
+    """
+    Copies the last row of the table and appends it to the end.
+    """
+    import copy # This is required for the deepcopy to work
+    
+    # 1. Get the last row's XML element
+    new_row_xml = copy.deepcopy(table._tbl.tr_lst[-1])
+    
+    # 2. Append it to the table's XML list
+    table._tbl.append(new_row_xml)
+    
+    # 3. Clear the text in the new row so it's blank
+    new_row = table.rows[len(table.rows) - 1]
+    for cell in new_row.cells:
+        cell.text_frame.text = ""
+        
+    return new_row
+
+# --- HELPER TO DUPLICATE SLIDE (HANDLES IMAGES CORRECTLY) ---
+def duplicate_slide(pres, index):
+    """
+    Robustly duplicate the slide at 'index', handling images correctly by 
+    extracting their data and re-adding them.
+    """
+    source = pres.slides[index]
+    # Create new slide with same layout
+    dest = pres.slides.add_slide(source.slide_layout)
+
+    # Remove any default placeholders/shapes on the new slide so it's clean
+    for shp in dest.shapes:
+        shp.element.getparent().remove(shp.element)
+
+    # Iterate through source shapes to preserve order
+    for shp in source.shapes:
+        if shp.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            # --- IT'S AN IMAGE: Handle specially ---
+            try:
+                # 1. Extract raw image data
+                blob = shp.image.blob
+                # 2. Wrap data in a stream so pptx can read it
+                image_stream = io.BytesIO(blob)
+                # 3. Add as a NEW picture shape at same coordinates
+                dest.shapes.add_picture(
+                    image_stream, shp.left, shp.top, shp.width, shp.height
+                )
+            except Exception as e:
+                print(f"Warning: Could not copy image on slide duplication: {e}")
+        else:
+            # --- IT'S A TABLE/TEXTBOX/SHAPE: Deepcopy works ---
+            new_el = copy.deepcopy(shp.element)
+            dest.shapes._spTree.append(new_el)
+
+    return dest
+# ==================== MAIN ROUTE ==================
+
+@app.route('/generate_ppt/<filename>')
+@login_required
+def generate_ppt(filename):
+    # 1. Path Setup
+    excel_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+    template_path = os.path.join(app.root_path, 'Inspection Plan Powerpoint Template.pptx')
+    output_pptx_name = f"Inspection_Plan_{filename.replace('.xlsx', '.pptx')}"
+    output_pptx_path = os.path.join(app.config['OUTPUT_FOLDER'], output_pptx_name)
+
+    # 2. Check Files
+    if not os.path.exists(excel_path):
+        flash("Excel file missing.", "error")
+        return redirect(url_for('index'))
+    if not os.path.exists(template_path):
+        flash("PPT template missing.", "error")
+        return redirect(url_for('index'))
+
+    # ==========================================
+    # PASS 1: EXTRACT METADATA (Tag, PMT, Desc)
+    # ==========================================
+    tag_val, pmt_val, desc_val = "", "", ""
+    try:
+        df_meta = pd.read_excel(excel_path, header=None, nrows=15)
+        for r_idx, row in df_meta.iterrows():
+            for c_idx, cell in enumerate(row):
+                s = str(cell).strip().upper()
+                if any(x in s for x in ["TAG NO", "TAG. NO", "EQUIPMENT NO"]) and not tag_val:
+                    if c_idx+1 < len(row) and str(row[c_idx+1]).strip() not in ['nan', '']: tag_val = str(row[c_idx+1])
+                    elif c_idx+2 < len(row): tag_val = str(row[c_idx+2])
+                if any(x in s for x in ["PMT NO", "PMT. NO"]) and not pmt_val:
+                    if c_idx+1 < len(row) and str(row[c_idx+1]).strip() not in ['nan', '']: pmt_val = str(row[c_idx+1])
+                    elif c_idx+2 < len(row): pmt_val = str(row[c_idx+2])
+                if any(x in s for x in ["DESCRIPTION", "DESC."]) and not desc_val:
+                    if c_idx+1 < len(row) and str(row[c_idx+1]).strip() not in ['nan', '']: desc_val = str(row[c_idx+1])
+                    elif c_idx+2 < len(row): desc_val = str(row[c_idx+2])
+    except: pass
+
+    # ==========================================
+    # PASS 2: CONTENT-AWARE SCANNING (Victory Logic)
+    # ==========================================
+    try:
+        df_raw = pd.read_excel(excel_path, header=None)
+        
+        # 1. Find the Anchor Row (Start of Data Table)
+        anchor_idx = None
+        for idx, row in df_raw.iterrows():
+            r_str = row.astype(str).str.upper().tolist()
+            if "TYPE" in r_str and "SPEC." in r_str:
+                anchor_idx = idx
+                break
+        
+        if anchor_idx is None:
+            flash("Could not find table headers (TYPE/SPEC).", "error")
+            return redirect(url_for('index'))
+
+        # 2. Slice Data
+        df_data = df_raw.iloc[anchor_idx + 1:].copy().reset_index(drop=True)
+        df_data = df_data.fillna('-')
+        
+        # Get Header Rows for keyword matching
+        header_row_sub = df_raw.iloc[anchor_idx].astype(str).str.upper().tolist()
+        header_row_main = []
+        if anchor_idx > 0:
+            header_row_main = df_raw.iloc[anchor_idx-1].astype(str).str.upper().tolist()
+
+        # 3. IDENTIFY COLUMNS
+        idx_fluid, idx_part = None, None
+        idx_type, idx_spec, idx_grade = None, None, None
+        idx_insul = None
+        idx_temp, idx_press = None, None
+
+        num_cols = df_data.shape[1]
+        
+        # A. Find PARTS (Look for words like HEAD, SHELL, FLANGE)
+        # Avoid columns that are just Tag Numbers (V-001)
+        best_part_score = -1
+        for c in range(num_cols):
+            score = 0
+            for val in df_data.iloc[:10, c]:
+                v = str(val).upper()
+                if any(k in v for k in ['HEAD', 'SHELL', 'PIPE', 'FLANGE', 'PLATE']): score += 2
+                if 'V-' in v: score -= 5 # Penalty for Tag No column
+            
+            # Header boost
+            if c < len(header_row_main) and 'PARTS' in header_row_main[c]: score += 10
+            
+            if score > best_part_score:
+                best_part_score = score
+                idx_part = c
+
+        # B. Find MATERIAL TYPE (Stainless, Carbon)
+        best_type_score = -1
+        for c in range(num_cols):
+            score = 0
+            for val in df_data.iloc[:10, c]:
+                v = str(val).upper()
+                if any(k in v for k in ['STAINLESS', 'CARBON', 'STEEL']): score += 2
+            
+            # Header boost
+            if c < len(header_row_sub) and 'TYPE' in header_row_sub[c]: score += 10
+            
+            if score > best_type_score:
+                best_type_score = score
+                idx_type = c
+
+        # C. Find FLUID (Condensate, Water, Gas - or Header 'FLUID')
+        # Check Headers First!
+        for c in range(min(len(header_row_main), num_cols)):
+            if "FLUID" in header_row_main[c] or "MEDIA" in header_row_main[c]:
+                idx_fluid = c
+                break
+        
+        # Fallback: Look for fluid names if header failed
+        if idx_fluid is None:
+            best_fluid_score = -1
+            for c in range(num_cols):
+                if c == idx_part or c == idx_type: continue
+                score = 0
+                for val in df_data.iloc[:10, c]:
+                    v = str(val).upper()
+                    if any(k in v for k in ['WATER', 'GAS', 'CONDENSATE', 'OIL', 'AIR']): score += 2
+                if score > best_fluid_score and score > 0:
+                    best_fluid_score = score
+                    idx_fluid = c
+            # Last resort: Column 0
+            if idx_fluid is None: idx_fluid = 0
+
+        # D. Find INSULATION (N/A, YES, NO)
+        # Scan Headers First
+        for c in range(min(len(header_row_main), num_cols)):
+            if "INSUL" in header_row_main[c]: 
+                idx_insul = c
+                break
+        
+        # Scan Data content if header missing
+        if idx_insul is None:
+            best_ins_score = -1
+            for c in range(num_cols):
+                if c in [idx_part, idx_type, idx_fluid]: continue
+                score = 0
+                for val in df_data.iloc[:10, c]:
+                    v = str(val).upper()
+                    # Strong signal for insulation column
+                    if v in ['N/A', 'YES', 'NO', 'NA']: score += 3
+                if score > best_ins_score and score > 0:
+                    best_ins_score = score
+                    idx_insul = c
+
+        # E. Find SPEC and GRADE (Relative to Type usually)
+        # Scan Headers first
+        for c in range(min(len(header_row_sub), num_cols)):
+            if "SPEC" in header_row_sub[c]: idx_spec = c
+            if "GRADE" in header_row_sub[c] or "GR." in header_row_sub[c] or header_row_sub[c] == "GR": idx_grade = c
+            
+        # Fallback relative to Type
+        if idx_type is not None:
+            if idx_spec is None: idx_spec = idx_type + 1
+            if idx_grade is None: idx_grade = idx_type + 2
+            
+        # F. Find TEMP / PRESS (Look for Units)
+        for c in range(num_cols):
+            # Header Check
+            h_main = header_row_main[c] if c < len(header_row_main) else ""
+            h_sub = header_row_sub[c] if c < len(header_row_sub) else ""
+            full_head = (h_main + " " + h_sub)
+            
+            # Skip Design columns if possible
+            if "DESIGN" in full_head: continue
+
+            if "TEMP" in full_head or "T (C)" in full_head: idx_temp = c
+            if "PRESS" in full_head or "P (MPA)" in full_head: idx_press = c
+
+        # 4. Filter Data (Use valid part column)
+        if idx_part is not None:
+             df_data = df_data[
+                (df_data[idx_part].astype(str).str.strip() != '-') & 
+                (df_data[idx_part].astype(str).str.strip() != '') &
+                (df_data[idx_part].astype(str).str.strip() != 'nan') &
+                (df_data[idx_part].astype(str).str.strip().str.upper() != 'COMPONENT') 
+            ]
+
+    except Exception as e:
+        flash(f"Error processing data: {e}", "error")
+        return redirect(url_for('index'))
+
+    # ==========================================
+    # GENERATE POWERPOINT
+    # ==========================================
+    prs = Presentation(template_path)
+    MAX_ROWS = 5
+    data_rows = [row for _, row in df_data.iterrows()]
+    chunks = [data_rows[i:i + MAX_ROWS] for i in range(0, len(data_rows), MAX_ROWS)] if data_rows else [[]]
+
+    for i, chunk in enumerate(chunks):
+        if i == 0: slide = prs.slides[0]
+        else: slide = duplicate_slide(prs, 0)
+        
+        # Fill Header
+        for shape in slide.shapes:
+            if not shape.has_table: continue
+            tbl = shape.table
+            try:
+                r0 = " ".join([c.text_frame.text.upper() for c in tbl.rows[0].cells])
+                if "TAG" in r0 or "DESC" in r0:
+                    for row in tbl.rows:
+                        for idx, cell in enumerate(row.cells):
+                            txt = cell.text_frame.text.strip().upper()
+                            if "TAG" in txt and idx+1 < len(row.cells): _set_cell_text(row.cells[idx+1], tag_val)
+                            elif "PMT" in txt and idx+1 < len(row.cells): _set_cell_text(row.cells[idx+1], pmt_val)
+                            elif "DESCRIPTION" in txt and idx+1 < len(row.cells): _set_cell_text(row.cells[idx+1], desc_val)
+            except: pass
+
+        # Fill Data
+        main_table = None
+        for shape in slide.shapes:
+            if shape.has_table:
+                try:
+                    r0 = " ".join([c.text_frame.text.upper() for c in shape.table.rows[0].cells])
+                    if "COMPONENT" in r0 and "FLUID" in r0:
+                        main_table = shape.table
+                        break
+                except: continue
+        
+        if main_table:
+            start_row = 2
+            while len(main_table.rows) < (start_row + MAX_ROWS):
+                add_new_row(main_table)
+            
+            for idx_in_chunk, row_data in enumerate(chunk):
+                curr_idx = start_row + idx_in_chunk
+                cells = main_table.rows[curr_idx].cells
+                
+                # USE INTELLIGENT INDICES
+                val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
+                _set_cell_text(cells[0], val_fluid, 9)
+                
+                val_part = row_data.get(idx_part, '') if idx_part is not None else ''
+                _set_cell_text(cells[1], val_part, 9)
+                
+                _set_cell_text(cells[2], "", 9) 
+                
+                _set_cell_text(cells[3], row_data.get(idx_type, ''), 9)
+                _set_cell_text(cells[4], row_data.get(idx_spec, ''), 9)
+                _set_cell_text(cells[5], row_data.get(idx_grade, ''), 9)
+                
+                val_ins = row_data.get(idx_insul, '') if idx_insul is not None else ''
+                _set_cell_text(cells[6], val_ins, 9)
+                
+                val_temp = row_data.get(idx_temp, '') if idx_temp is not None else ''
+                _set_cell_text(cells[7], val_temp, 9)
+                
+                val_press = row_data.get(idx_press, '') if idx_press is not None else ''
+                _set_cell_text(cells[8], val_press, 9)
+
+            for j in range(len(chunk), MAX_ROWS):
+                curr_idx = start_row + j
+                if curr_idx < len(main_table.rows):
+                    for cell in main_table.rows[curr_idx].cells:
+                        _set_cell_text(cell, "", 9)
+
+    prs.save(output_pptx_path)
+    return send_file(output_pptx_path, as_attachment=True)
 # ==================== DATABASE MODELS ==================
 
 class Role(db.Model):
@@ -226,7 +589,7 @@ def call_gemini_api(images, prompt, api_key):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = requests.post(api_url, headers=headers, data=json.dumps(payload), timeout=30)
+            response = requests.post(api_url, headers=headers, data=json.dumps(payload), timeout=125)
             response.raise_for_status()
             return response.json()['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
