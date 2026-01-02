@@ -23,7 +23,6 @@ import io
 import requests
 import base64
 from openpyxl import load_workbook
-# --- IMPORT ADDED: Needed for centering text in merged cells ---
 from openpyxl.styles import Alignment 
 import shutil
 import time as sleep_time 
@@ -39,11 +38,18 @@ from pptx import Presentation
 from pptx.util import Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
-# --- LOAD API KEY ---
+# --- LOAD ENVIRONMENT VARIABLES (Reading from .env) ---
 load_dotenv()
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+DATABASE_URL = os.environ.get('DATABASE_URL')
+POPPLER_PATH = os.environ.get('POPPLER_PATH')
+
 if not GEMINI_API_KEY:
-    raise ValueError("CRITICAL ERROR: 'GEMINI_API_KEY' not set.")
+    raise ValueError("CRITICAL ERROR: 'GEMINI_API_KEY' not set in .env file.")
+if not DATABASE_URL:
+    raise ValueError("CRITICAL ERROR: 'DATABASE_URL' not set in .env file.")
+if not POPPLER_PATH:
+    raise ValueError("CRITICAL ERROR: 'POPPLER_PATH' not set in .env file.")
 
 # --- APP SETUP ---
 app = Flask(__name__)
@@ -63,7 +69,7 @@ login_manager.login_message_category = 'error'
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
 ANNOUNCEMENT_FOLDER = 'announcements'
-POPPLER_PATH = r'C:\poppler-25.07.0\Library\bin' # Verify this path on your machine!
+# POPPLER_PATH is read from .env above
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -442,7 +448,7 @@ def generate_ppt(filename):
     prs.save(output_pptx_path)
     return send_file(output_pptx_path, as_attachment=True)
 # ==================== DATABASE MODELS ==================
-
+# (Models are unchanged from your input)
 class Role(db.Model):
     __tablename__ = 'roles'
     role_id = db.Column(db.Integer, primary_key=True)
@@ -512,11 +518,41 @@ class Announcement(db.Model):
     visible_to_manager = db.Column(db.Boolean, default=False, nullable=False)
     visible_to_engineer = db.Column(db.Boolean, default=False, nullable=False)
 
+# ==================== DATABASE INIT COMMAND ==================
+
+@app.cli.command('init-db')
+@click.option('--drop', is_flag=True)
+def init_db(drop):
+    if drop: db.drop_all()
+    db.create_all()
+    # --- CHANGE: Correct database seeding to create three roles ---
+    if not Role.query.first():
+        a = Role(role_name='Admin')
+        m = Role(role_name='Manager')
+        e = Role(role_name='Engineer')
+        db.session.add_all([a, m, e])
+        db.session.commit()
+        
+        # Create default users
+        admin = User(username='admin@ipetro.com', name='Admin', email='admin@ipetro.com', role_id=a.role_id) 
+        admin.set_password('abc1234')
+        
+        manager = User(username='manager@ipetro.com', name='Manager', email='manager@ipetro.com', role_id=m.role_id) 
+        manager.set_password('abc1234')
+        
+        eng = User(username='engineer@ipetro.com', name='Engineer', email='engineer@ipetro.com', role_id=e.role_id)
+        eng.set_password('abc1234')
+        
+        db.session.add_all([admin, manager, eng]) 
+        db.session.commit()
+    print("DB Initialized.")
+
 # ==================== FORMS ==================
 
 class CreateUserForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=4, max=80)])
-    role = SelectField('Role', choices=[('Engineer', 'Engineer'), ('Manager', 'Manager')], validators=[DataRequired()])
+    # --- CHANGE: Add Admin role to the form choices ---
+    role = SelectField('Role', choices=[('Admin', 'Admin'), ('Engineer', 'Engineer'), ('Manager', 'Manager')], validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
     submit = SubmitField('Create User')
@@ -550,9 +586,11 @@ class AnnouncementForm(FlaskForm):
             return False
         return True
 
-# ==================== HELPERS ==================
+# ==================== HELPERS (Decorators and Gemini Logic) ==================
 
+# --- CHANGE: Correct Admin decorator logic ---
 def admin_required(f):
+    """Decorator to restrict access to Admin-only pages."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         # FIX: Allow BOTH 'Manager' and 'Admin' roles
@@ -561,6 +599,18 @@ def admin_required(f):
             return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+# --- ADDED: Manager decorator for Manager-only routes ---
+def manager_required(f):
+    """Decorator to restrict access to Manager-only pages."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role.role_name != 'Manager':
+            flash('Permission denied to access this reporting page.', 'error')
+            return redirect(url_for('index')) 
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -605,54 +655,25 @@ def refine_material_type(spec, grade, ai_suggested_type="Not Found"):
     Determines Material Type by looking at BOTH Spec and Grade.
     Includes rules for Bolts, Nuts, Structural, and JIS standards.
     """
-    # 1. Clean up the inputs (Safety first)
     s = str(spec).upper() if spec else ""
     g = str(grade).upper() if grade else ""
     t = str(ai_suggested_type).upper() if ai_suggested_type else ""
 
     # --- PRIORITY RULES (Specific items first) ---
-
-    # 1. Structural Steel (S275JR)
-    if "S275" in s or "S275" in g or "JR" in g:
-        return "Structural Steel"
-
-    # 2. Stainless Steel Bolting (SA-193 / A193)
-    if "193" in s or "193" in g:
-        return "Stainless Steel Bolting"
-
-    # 3. Heavy Hex Nuts (SA-194 / A194)
-    if "194" in s or "194" in g:
-        return "Heavy Hex Nuts"
-
-    # 4. JIS Carbon Steel (JIS G3507)
-    if "G3507" in s or "G3507" in g:
-        return "Carbon Steel"
+    if "S275" in s or "S275" in g or "JR" in g: return "Structural Steel"
+    if "193" in s or "193" in g: return "Stainless Steel Bolting"
+    if "194" in s or "194" in g: return "Heavy Hex Nuts"
+    if "G3507" in s or "G3507" in g: return "Carbon Steel"
 
     # --- GENERAL RULES ---
-
-    # 5. Stainless Steel General
-    if "304" in g or "316" in g or "321" in g or "347" in g:
-        return "Stainless Steel"
+    if "304" in g or "316" in g or "321" in g or "347" in g: return "Stainless Steel"
     if "SA-240" in s or "SA-312" in s or "SA-182" in s:
-        # Double check SA-182 isn't actually Chrome-Moly Alloy
-        if "F11" not in g and "F22" not in g:
-            return "Stainless Steel"
+        if "F11" not in g and "F22" not in g: return "Stainless Steel"
+    if "2205" in g or "S31803" in g: return "Duplex SS"
+    if "SA-106" in s or "SA-105" in s or "SA-516" in s or "API 5L" in s or "A106" in s or "A516" in s: return "Carbon Steel"
+    if "F11" in g or "F22" in g or "P11" in g or "P22" in g: return "Alloy Steel"
 
-    # 6. Duplex
-    if "2205" in g or "S31803" in g:
-        return "Duplex SS"
-
-    # 7. Carbon Steel General
-    if "SA-106" in s or "SA-105" in s or "SA-516" in s or "API 5L" in s or "A106" in s or "A516" in s:
-        return "Carbon Steel"
-    
-    # 8. Alloy Steel
-    if "F11" in g or "F22" in g or "P11" in g or "P22" in g:
-        return "Alloy Steel"
-
-    # 9. Fallback: If we found nothing, trust the AI (unless it said "Other")
-    if t and t != "NOT FOUND" and t != "NONE" and t != "OTHER":
-        return ai_suggested_type
+    if t and t != "NOT FOUND" and t != "NONE" and t != "OTHER": return ai_suggested_type
 
     return "Not Found"
 
@@ -666,7 +687,6 @@ def parse_gemini_response(json_text, drawing_name):
     
     parts = data.get("parts_list", []) or [{"part_name": "Not Found"}]
     
-    # Extract general data once
     fluid = data.get("fluid", "Not Found")
     design_temp = data.get("design_temperature", "Not Found")
     design_press = data.get("design_pressure", "Not Found")
@@ -674,19 +694,16 @@ def parse_gemini_response(json_text, drawing_name):
     op_press = data.get("operating_pressure", "Not Found")
 
     for part in parts:
-        # Get raw values
         raw_spec = part.get("material_spec", "Not Found")
         raw_grade = part.get("material_grade", "Not Found")
         
-        # --- CRITICAL FIX: CALL THE INFERENCE FUNCTION ---
         final_type = refine_material_type(raw_spec, raw_grade)
-        # -------------------------------------------------
 
         extracted_data.append({
             "source_drawing": drawing_name,
             "part_name": part.get("part_name", "Not Found"),
             "fluid": fluid,
-            "material_type": final_type, # Use the calculated type here
+            "material_type": final_type, 
             "material_spec": raw_spec,
             "material_grade": raw_grade,
             'TEMP. (°C) ': design_temp,
@@ -699,6 +716,7 @@ def parse_gemini_response(json_text, drawing_name):
 
 # ==================== ROUTES ==================
 
+# --- CHANGE: Complete Login/Redirect Logic for three roles ---
 @app.route('/', methods=['GET', 'POST'])
 def login():
     # 1. If already logged in, redirect based on role
@@ -733,7 +751,9 @@ def logout():
 @app.route('/home')
 @login_required
 def index():
+    """Renders the simple index.html file (default Engineer dashboard)."""
     return render_template('index.html')
+
 
 @app.route('/upload', methods=['POST'])
 @login_required
@@ -866,7 +886,6 @@ def view_uploaded_file(filename):
 def manual_input():
     return render_template('manual_input.html')
 
-# --- THIS IS THE UPDATED SAVE FUNCTION WITH EXCEL MERGING ---
 @app.route('/save_data', methods=['POST'])
 @login_required
 def save_data():
@@ -875,7 +894,7 @@ def save_data():
         
         # 1. Collect Data from Form
         rows = []
-        parts = get_vals('PARTS') # Use parts as length reference
+        parts = get_vals('PARTS') 
         
         for i in range(len(parts)):
             rows.append({
@@ -932,8 +951,6 @@ def save_data():
             row_copy = r.copy()
             curr_equip = r['EQUIPMENT NO. ']
             
-            # Logic: If this Equipment No is the same as previous, 
-            # make the grouping columns empty so the Merge logic works.
             if curr_equip == prev_equip_no:
                 row_copy['NO.'] = ""
                 row_copy['EQUIPMENT NO. '] = ""
@@ -959,42 +976,33 @@ def save_data():
         with pd.ExcelWriter(filepath, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
             df.to_excel(writer, sheet_name=TARGET_SHEET, startrow=start_row, index=False, header=False)
 
-        # 5. Apply Merging Logic (Restored from your old code)
-        print("Applying cell merging...")
+        # 5. Apply Merging Logic
         wb = load_workbook(filepath)
         ws = wb[TARGET_SHEET]
         
-        # Columns to merge: A(1), B(2), C(3), D(4)
         cols_to_merge = [1, 2, 3, 4]
         
-        # Start looking from where we just wrote data
-        # Note: If start_row was 1 (header), data starts at 2. 
-        # But allow scanning whole sheet to be safe or start from newly added area.
         row = 2 
         max_row = ws.max_row
 
         while row <= max_row:
-            # Check Equipment No (Column 2)
             cell_val = ws.cell(row=row, column=2).value
             
             if cell_val:
                 start_merge_row = row
                 next_row = row + 1
                 
-                # Look ahead for empty cells in Col 2 (Created in Step 3)
                 while next_row <= max_row and not ws.cell(row=next_row, column=2).value:
                     next_row += 1
                 
                 end_merge_row = next_row - 1
                 
-                # Merge logic
                 if end_merge_row > start_merge_row:
                     for col_idx in cols_to_merge:
                         ws.merge_cells(start_row=start_merge_row, start_column=col_idx, end_row=end_merge_row, end_column=col_idx)
                         cell = ws.cell(row=start_merge_row, column=col_idx)
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                 else:
-                    # Center single row items too
                     for col_idx in cols_to_merge:
                         cell = ws.cell(row=start_merge_row, column=col_idx)
                         cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1004,7 +1012,6 @@ def save_data():
                 row += 1
         
         wb.save(filepath)
-        print("Merging complete.")
 
         # 6. Finalize
         history.excel_filename = filename
@@ -1031,7 +1038,8 @@ def download_file(filename):
 @app.route('/notifications')
 @login_required
 def notifications():
-    anns = Announcement.query.filter_by(visible_to_engineer=True).order_by(Announcement.created_at.desc()).all()
+    # --- CHANGE: Show announcements visible to Engineer OR Manager ---
+    anns = Announcement.query.filter((Announcement.visible_to_engineer == True) | (Announcement.visible_to_manager == True)).order_by(Announcement.created_at.desc()).all()
     return render_template('notification.html', announcements=anns)
 
 @app.route('/profile', methods=['GET', 'POST'])
@@ -1057,20 +1065,85 @@ def personal_info():
 def download_announcement(filename):
     return send_from_directory(app.config['ANNOUNCEMENT_FOLDER'], filename, as_attachment=True)
 
-# ==================== ADMIN ROUTES ==================
+# ==================================================================
+# ====================== MANAGER-ONLY ROUTES =======================
+# ==================================================================
+
+@app.route('/manager/dashboard')
+@login_required
+@manager_required
+def manager_dashboard():
+    # --- ADDED: Manager Dashboard Logic ---
+    total_batches = History.query.count()
+    total_parts = EquipmentData.query.count()
+    
+    engineer_role = Role.query.filter_by(role_name='Engineer').first()
+    engineer_count = User.query.filter_by(role_id=engineer_role.role_id).count() if engineer_role else 0
+
+    recent_activity = History.query.order_by(History.created_at.desc()).limit(5).all()
+    
+    # Engineer Leaderboard (Top 3 contributors by batch count)
+    top_engineers = db.session.query(
+        User.name, 
+        func.count(History.history_id).label('batch_count')
+    ).join(History, User.user_id == History.created_by_user_id
+    ).filter(User.role_id == engineer_role.role_id if engineer_role else True) .group_by(User.name
+    ).order_by(func.count(History.history_id).desc()
+    ).limit(3).all()
+
+    return render_template(
+        'dashboard_manager.html',
+        total_batches=total_batches,
+        total_parts=total_parts,
+        engineer_count=engineer_count,
+        recent_activity=recent_activity,
+        top_engineers=top_engineers
+    )
+
+@app.route('/manager/history')
+@login_required
+@manager_required
+def manager_history():
+    return render_template('manager_history.html', all_history=History.query.order_by(History.created_at.desc()).all())
+
+@app.route('/manager/reports')
+@login_required
+@manager_required
+def manager_reports():
+    return render_template('manager_placeholder.html', title='Detailed Data Reports')
+
+@app.route('/manager/review')
+@login_required
+@manager_required
+def manager_review_queue():
+    return render_template('manager_placeholder.html', title='Final Review Queue')
+
+# ==================================================================
+# ======================= ADMIN-ONLY ROUTES ========================
+# ==================================================================
 
 @app.route('/admin/dashboard')
 @login_required
 @admin_required
 def admin_dashboard():
+    # --- ADDED: Admin Dashboard Logic ---
     u_count = User.query.count()
-    a_count = User.query.join(Role).filter(Role.role_name == 'Manager').count()
-    e_count = User.query.join(Role).filter(Role.role_name == 'Engineer').count()
+    
+    admin_role = Role.query.filter_by(role_name='Admin').first()
+    admin_count = User.query.filter_by(role_id=admin_role.role_id).count() if admin_role else 0
+
+    manager_role = Role.query.filter_by(role_name='Manager').first()
+    manager_count = User.query.filter_by(role_id=manager_role.role_id).count() if manager_role else 0
+    
+    engineer_role = Role.query.filter_by(role_name='Engineer').first()
+    engineer_count = User.query.filter_by(role_id=engineer_role.role_id).count() if engineer_role else 0
+
     f_total = History.query.count()
     today = datetime.utcnow().date()
     f_today = History.query.filter(History.created_at >= datetime.combine(today, time.min), History.created_at <= datetime.combine(today, time.max)).count()
     recent = User.query.order_by(User.user_id.desc()).limit(5).all()
-    return render_template('dashboard_admin.html', user_count=u_count, admin_count=a_count, engineer_count=e_count, file_count_total=f_total, file_count_today=f_today, recent_users=recent)
+    
+    return render_template('dashboard_admin.html', user_count=u_count, admin_count=admin_count, manager_count=manager_count, engineer_count=engineer_count, file_count_total=f_total, file_count_today=f_today, recent_users=recent)
 
 @app.route('/admin/create-user', methods=['GET', 'POST'])
 @login_required
@@ -1169,5 +1242,6 @@ def init_db(drop):
         
     print("DB Initialized.")
 
+# --- Main Application Runner ---
 if __name__ == '__main__':
     app.run(debug=True)
