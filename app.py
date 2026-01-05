@@ -19,7 +19,6 @@ from dotenv import load_dotenv
 import pandas as pd
 import pdf2image
 from PIL import Image
-import io
 import requests
 import base64
 from openpyxl import load_workbook
@@ -69,7 +68,6 @@ login_manager.login_message_category = 'error'
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
 ANNOUNCEMENT_FOLDER = 'announcements'
-# POPPLER_PATH is read from .env above
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -90,26 +88,12 @@ template_column_order = [
     'TEMP. (°C)', 'PRESSURE (Mpa)' 
 ]
 
-def replace_text_exact(slide, search_str, new_str):
-    """
-    Searches for specific text in all text boxes and replaces it.
-    """
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            for paragraph in shape.text_frame.paragraphs:
-                for run in paragraph.runs:
-                    if search_str in run.text:
-                        run.text = run.text.replace(search_str, str(new_str))
-
-# ==================== ROUTES ==================
-
 # ==================== HELPER FUNCTIONS ==================
 
 def _set_cell_text(cell, text, font_size=10):
     """
     Helper to set text in a table cell with specific font size and alignment.
     """
-    # 1. Clean the text
     if text is None:
         text = "-"
     
@@ -118,83 +102,60 @@ def _set_cell_text(cell, text, font_size=10):
     if text_str == '' or text_str.lower() == 'nan':
         text_str = "-"
         
-    # 2. Set the text
     cell.text_frame.text = text_str
     
-    # 3. Apply styling to every paragraph in the cell
     for paragraph in cell.text_frame.paragraphs:
         paragraph.font.size = Pt(font_size)
-        paragraph.font.name = 'Arial'  # Standard font
+        paragraph.font.name = 'Arial'
         
-    # 4. Center vertically
     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
 
 def add_new_row(table):
     """
     Copies the last row of the table and appends it to the end.
     """
-    import copy # This is required for the deepcopy to work
-    
-    # 1. Get the last row's XML element
+    import copy
     new_row_xml = copy.deepcopy(table._tbl.tr_lst[-1])
-    
-    # 2. Append it to the table's XML list
     table._tbl.append(new_row_xml)
-    
-    # 3. Clear the text in the new row so it's blank
     new_row = table.rows[len(table.rows) - 1]
     for cell in new_row.cells:
         cell.text_frame.text = ""
-        
     return new_row
 
-# --- HELPER TO DUPLICATE SLIDE (HANDLES IMAGES CORRECTLY) ---
 def duplicate_slide(pres, index):
     """
-    Robustly duplicate the slide at 'index', handling images correctly by 
-    extracting their data and re-adding them.
+    Robustly duplicate the slide at 'index', handling images correctly.
     """
     source = pres.slides[index]
-    # Create new slide with same layout
     dest = pres.slides.add_slide(source.slide_layout)
 
-    # Remove any default placeholders/shapes on the new slide so it's clean
     for shp in dest.shapes:
         shp.element.getparent().remove(shp.element)
 
-    # Iterate through source shapes to preserve order
     for shp in source.shapes:
         if shp.shape_type == MSO_SHAPE_TYPE.PICTURE:
-            # --- IT'S AN IMAGE: Handle specially ---
             try:
-                # 1. Extract raw image data
                 blob = shp.image.blob
-                # 2. Wrap data in a stream so pptx can read it
                 image_stream = io.BytesIO(blob)
-                # 3. Add as a NEW picture shape at same coordinates
                 dest.shapes.add_picture(
                     image_stream, shp.left, shp.top, shp.width, shp.height
                 )
             except Exception as e:
                 print(f"Warning: Could not copy image on slide duplication: {e}")
         else:
-            # --- IT'S A TABLE/TEXTBOX/SHAPE: Deepcopy works ---
             new_el = copy.deepcopy(shp.element)
             dest.shapes._spTree.append(new_el)
 
     return dest
-# ==================== MAIN ROUTE ==================
 
 @app.route('/generate_ppt/<filename>')
 @login_required
 def generate_ppt(filename):
-    # 1. Path Setup
     excel_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
     template_path = os.path.join(app.root_path, 'Inspection Plan Powerpoint Template.pptx')
     output_pptx_name = f"Inspection_Plan_{filename.replace('.xlsx', '.pptx')}"
     output_pptx_path = os.path.join(app.config['OUTPUT_FOLDER'], output_pptx_name)
 
-    # 2. Check Files
     if not os.path.exists(excel_path):
         flash("Excel file missing.", "error")
         return redirect(url_for('index'))
@@ -202,9 +163,7 @@ def generate_ppt(filename):
         flash("PPT template missing.", "error")
         return redirect(url_for('index'))
 
-    # ==========================================
-    # PASS 1: EXTRACT METADATA (Tag, PMT, Desc)
-    # ==========================================
+    # --- PPT Generation Logic ---
     tag_val, pmt_val, desc_val = "", "", ""
     try:
         df_meta = pd.read_excel(excel_path, header=None, nrows=15)
@@ -222,13 +181,8 @@ def generate_ppt(filename):
                     elif c_idx+2 < len(row): desc_val = str(row[c_idx+2])
     except: pass
 
-    # ==========================================
-    # PASS 2: CONTENT-AWARE SCANNING (Victory Logic)
-    # ==========================================
     try:
         df_raw = pd.read_excel(excel_path, header=None)
-        
-        # 1. Find the Anchor Row (Start of Data Table)
         anchor_idx = None
         for idx, row in df_raw.iterrows():
             r_str = row.astype(str).str.upper().tolist()
@@ -240,17 +194,14 @@ def generate_ppt(filename):
             flash("Could not find table headers (TYPE/SPEC).", "error")
             return redirect(url_for('index'))
 
-        # 2. Slice Data
         df_data = df_raw.iloc[anchor_idx + 1:].copy().reset_index(drop=True)
         df_data = df_data.fillna('-')
         
-        # Get Header Rows for keyword matching
         header_row_sub = df_raw.iloc[anchor_idx].astype(str).str.upper().tolist()
         header_row_main = []
         if anchor_idx > 0:
             header_row_main = df_raw.iloc[anchor_idx-1].astype(str).str.upper().tolist()
 
-        # 3. IDENTIFY COLUMNS
         idx_fluid, idx_part = None, None
         idx_type, idx_spec, idx_grade = None, None, None
         idx_insul = None
@@ -258,106 +209,57 @@ def generate_ppt(filename):
 
         num_cols = df_data.shape[1]
         
-        # A. Find PARTS (Look for words like HEAD, SHELL, FLANGE)
-        # Avoid columns that are just Tag Numbers (V-001)
+        # --- Column Identification Logic ---
         best_part_score = -1
         for c in range(num_cols):
             score = 0
             for val in df_data.iloc[:10, c]:
                 v = str(val).upper()
                 if any(k in v for k in ['HEAD', 'SHELL', 'PIPE', 'FLANGE', 'PLATE']): score += 2
-                if 'V-' in v: score -= 5 # Penalty for Tag No column
-            
-            # Header boost
+                if 'V-' in v: score -= 5
             if c < len(header_row_main) and 'PARTS' in header_row_main[c]: score += 10
-            
             if score > best_part_score:
                 best_part_score = score
                 idx_part = c
 
-        # B. Find MATERIAL TYPE (Stainless, Carbon)
         best_type_score = -1
         for c in range(num_cols):
             score = 0
             for val in df_data.iloc[:10, c]:
                 v = str(val).upper()
                 if any(k in v for k in ['STAINLESS', 'CARBON', 'STEEL']): score += 2
-            
-            # Header boost
             if c < len(header_row_sub) and 'TYPE' in header_row_sub[c]: score += 10
-            
             if score > best_type_score:
                 best_type_score = score
                 idx_type = c
 
-        # C. Find FLUID (Condensate, Water, Gas - or Header 'FLUID')
-        # Check Headers First!
         for c in range(min(len(header_row_main), num_cols)):
             if "FLUID" in header_row_main[c] or "MEDIA" in header_row_main[c]:
                 idx_fluid = c
                 break
-        
-        # Fallback: Look for fluid names if header failed
-        if idx_fluid is None:
-            best_fluid_score = -1
-            for c in range(num_cols):
-                if c == idx_part or c == idx_type: continue
-                score = 0
-                for val in df_data.iloc[:10, c]:
-                    v = str(val).upper()
-                    if any(k in v for k in ['WATER', 'GAS', 'CONDENSATE', 'OIL', 'AIR']): score += 2
-                if score > best_fluid_score and score > 0:
-                    best_fluid_score = score
-                    idx_fluid = c
-            # Last resort: Column 0
-            if idx_fluid is None: idx_fluid = 0
+        if idx_fluid is None: idx_fluid = 0
 
-        # D. Find INSULATION (N/A, YES, NO)
-        # Scan Headers First
         for c in range(min(len(header_row_main), num_cols)):
             if "INSUL" in header_row_main[c]: 
                 idx_insul = c
                 break
-        
-        # Scan Data content if header missing
-        if idx_insul is None:
-            best_ins_score = -1
-            for c in range(num_cols):
-                if c in [idx_part, idx_type, idx_fluid]: continue
-                score = 0
-                for val in df_data.iloc[:10, c]:
-                    v = str(val).upper()
-                    # Strong signal for insulation column
-                    if v in ['N/A', 'YES', 'NO', 'NA']: score += 3
-                if score > best_ins_score and score > 0:
-                    best_ins_score = score
-                    idx_insul = c
 
-        # E. Find SPEC and GRADE (Relative to Type usually)
-        # Scan Headers first
         for c in range(min(len(header_row_sub), num_cols)):
             if "SPEC" in header_row_sub[c]: idx_spec = c
             if "GRADE" in header_row_sub[c] or "GR." in header_row_sub[c] or header_row_sub[c] == "GR": idx_grade = c
             
-        # Fallback relative to Type
         if idx_type is not None:
             if idx_spec is None: idx_spec = idx_type + 1
             if idx_grade is None: idx_grade = idx_type + 2
             
-        # F. Find TEMP / PRESS (Look for Units)
         for c in range(num_cols):
-            # Header Check
             h_main = header_row_main[c] if c < len(header_row_main) else ""
             h_sub = header_row_sub[c] if c < len(header_row_sub) else ""
             full_head = (h_main + " " + h_sub)
-            
-            # Skip Design columns if possible
             if "DESIGN" in full_head: continue
-
             if "TEMP" in full_head or "T (C)" in full_head: idx_temp = c
             if "PRESS" in full_head or "P (MPA)" in full_head: idx_press = c
 
-        # 4. Filter Data (Use valid part column)
         if idx_part is not None:
              df_data = df_data[
                 (df_data[idx_part].astype(str).str.strip() != '-') & 
@@ -370,9 +272,6 @@ def generate_ppt(filename):
         flash(f"Error processing data: {e}", "error")
         return redirect(url_for('index'))
 
-    # ==========================================
-    # GENERATE POWERPOINT
-    # ==========================================
     prs = Presentation(template_path)
     MAX_ROWS = 5
     data_rows = [row for _, row in df_data.iterrows()]
@@ -417,7 +316,6 @@ def generate_ppt(filename):
                 curr_idx = start_row + idx_in_chunk
                 cells = main_table.rows[curr_idx].cells
                 
-                # USE INTELLIGENT INDICES
                 val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
                 _set_cell_text(cells[0], val_fluid, 9)
                 
@@ -447,8 +345,8 @@ def generate_ppt(filename):
 
     prs.save(output_pptx_path)
     return send_file(output_pptx_path, as_attachment=True)
+
 # ==================== DATABASE MODELS ==================
-# (Models are unchanged from your input)
 class Role(db.Model):
     __tablename__ = 'roles'
     role_id = db.Column(db.Integer, primary_key=True)
@@ -518,40 +416,10 @@ class Announcement(db.Model):
     visible_to_manager = db.Column(db.Boolean, default=False, nullable=False)
     visible_to_engineer = db.Column(db.Boolean, default=False, nullable=False)
 
-# ==================== DATABASE INIT COMMAND ==================
-
-@app.cli.command('init-db')
-@click.option('--drop', is_flag=True)
-def init_db(drop):
-    if drop: db.drop_all()
-    db.create_all()
-    # --- CHANGE: Correct database seeding to create three roles ---
-    if not Role.query.first():
-        a = Role(role_name='Admin')
-        m = Role(role_name='Manager')
-        e = Role(role_name='Engineer')
-        db.session.add_all([a, m, e])
-        db.session.commit()
-        
-        # Create default users
-        admin = User(username='admin@ipetro.com', name='Admin', email='admin@ipetro.com', role_id=a.role_id) 
-        admin.set_password('abc1234')
-        
-        manager = User(username='manager@ipetro.com', name='Manager', email='manager@ipetro.com', role_id=m.role_id) 
-        manager.set_password('abc1234')
-        
-        eng = User(username='engineer@ipetro.com', name='Engineer', email='engineer@ipetro.com', role_id=e.role_id)
-        eng.set_password('abc1234')
-        
-        db.session.add_all([admin, manager, eng]) 
-        db.session.commit()
-    print("DB Initialized.")
-
 # ==================== FORMS ==================
 
 class CreateUserForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=4, max=80)])
-    # --- CHANGE: Add Admin role to the form choices ---
     role = SelectField('Role', choices=[('Admin', 'Admin'), ('Engineer', 'Engineer'), ('Manager', 'Manager')], validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
@@ -586,23 +454,18 @@ class AnnouncementForm(FlaskForm):
             return False
         return True
 
-# ==================== HELPERS (Decorators and Gemini Logic) ==================
+# ==================== HELPERS ==================
 
-# --- CHANGE: Correct Admin decorator logic ---
 def admin_required(f):
-    """Decorator to restrict access to Admin-only pages."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # FIX: Allow BOTH 'Manager' and 'Admin' roles
         if not current_user.is_authenticated or current_user.role.role_name not in ['Manager', 'Admin']:
             flash('Permission denied.', 'error')
             return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
 
-# --- ADDED: Manager decorator for Manager-only routes ---
 def manager_required(f):
-    """Decorator to restrict access to Manager-only pages."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or current_user.role.role_name != 'Manager':
@@ -610,7 +473,6 @@ def manager_required(f):
             return redirect(url_for('index')) 
         return f(*args, **kwargs)
     return decorated_function
-
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -651,21 +513,15 @@ def clean_gemini_response(response_text):
     return match.group(1) if match else response_text.strip()
 
 def refine_material_type(spec, grade, ai_suggested_type="Not Found"):
-    """
-    Determines Material Type by looking at BOTH Spec and Grade.
-    Includes rules for Bolts, Nuts, Structural, and JIS standards.
-    """
     s = str(spec).upper() if spec else ""
     g = str(grade).upper() if grade else ""
     t = str(ai_suggested_type).upper() if ai_suggested_type else ""
 
-    # --- PRIORITY RULES (Specific items first) ---
     if "S275" in s or "S275" in g or "JR" in g: return "Structural Steel"
     if "193" in s or "193" in g: return "Stainless Steel Bolting"
     if "194" in s or "194" in g: return "Heavy Hex Nuts"
     if "G3507" in s or "G3507" in g: return "Carbon Steel"
 
-    # --- GENERAL RULES ---
     if "304" in g or "316" in g or "321" in g or "347" in g: return "Stainless Steel"
     if "SA-240" in s or "SA-312" in s or "SA-182" in s:
         if "F11" not in g and "F22" not in g: return "Stainless Steel"
@@ -696,7 +552,6 @@ def parse_gemini_response(json_text, drawing_name):
     for part in parts:
         raw_spec = part.get("material_spec", "Not Found")
         raw_grade = part.get("material_grade", "Not Found")
-        
         final_type = refine_material_type(raw_spec, raw_grade)
 
         extracted_data.append({
@@ -716,30 +571,38 @@ def parse_gemini_response(json_text, drawing_name):
 
 # ==================== ROUTES ==================
 
-# --- CHANGE: Complete Login/Redirect Logic for three roles ---
 @app.route('/', methods=['GET', 'POST'])
 def login():
-    # 1. If already logged in, redirect based on role
+    # 1. If user is already authenticated, redirect them based on their role immediately
     if current_user.is_authenticated:
-        if current_user.role.role_name in ['Admin', 'Manager']:
+        if current_user.role.role_name == 'Admin':
             return redirect(url_for('admin_dashboard'))
+        elif current_user.role.role_name == 'Manager':
+            return redirect(url_for('manager_dashboard'))
         else:
             return redirect(url_for('index'))
     
-    # 2. Handle Login Form Submission
+    # 2. Handle Login Form POST
     if request.method == 'POST':
-        user = User.query.filter((User.username == request.form.get('username')) | (User.email == request.form.get('username'))).first()
-        if user and user.check_password(request.form.get('password')) and user.role.role_name.lower() == request.form.get('role').lower():
+        username_input = request.form.get('username')
+        password_input = request.form.get('password')
+
+        # Find user by username OR email
+        user = User.query.filter((User.username == username_input) | (User.email == username_input)).first()
+        
+        if user and user.check_password(password_input):
             login_user(user)
             
-            # --- FIX IS HERE: Redirect Admins/Managers to Dashboard, others to Index ---
-            if user.role.role_name in ['Admin', 'Manager']:
+            # Redirect based on ROLE (No form input needed)
+            if user.role.role_name == 'Admin':
                 return redirect(url_for('admin_dashboard'))
+            elif user.role.role_name == 'Manager':
+                return redirect(url_for('manager_dashboard'))
             else:
                 return redirect(url_for('index'))
-            # ---------------------------------------------------------------------------
             
-        flash('Invalid credentials.', 'error')
+        flash('Invalid username or password.', 'error')
+
     return render_template('login.html')
 
 @app.route('/logout')
@@ -751,21 +614,16 @@ def logout():
 @app.route('/home')
 @login_required
 def index():
-    """Renders the simple index.html file (default Engineer dashboard)."""
     return render_template('index.html')
-
 
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload_file():
-    # 1. Basic validation
     if 'drawings' not in request.files:
         flash("No file part", "error")
         return redirect(url_for('index'))
     
     files = request.files.getlist('drawings')
-    
-    print(f"DEBUG: System received {len(files)} files.") 
     
     if not files or files[0].filename == '':
         flash("No selected file", "error")
@@ -775,49 +633,34 @@ def upload_file():
     all_data = [] 
     
     try:
-        # 2. Process each file
         for index, file in enumerate(files):
-            if file.filename == '': 
-                continue
+            if file.filename == '': continue
             
             safe_name = secure_filename(file.filename)
             path = os.path.join(app.config['UPLOAD_FOLDER'], safe_name)
             file.save(path)
             
-            print(f"--- Processing File {index + 1}/{len(files)}: {safe_name} ---")
-
             try:
-                # Convert PDF to Image & Call Gemini
                 images = pdf2image.convert_from_path(path, poppler_path=app.config.get('POPPLER_PATH') or POPPLER_PATH)
                 text = call_gemini_api(images, get_gemini_prompt(), GEMINI_API_KEY)
                 clean_text = clean_gemini_response(text)
                 
-                # Parse and Append
                 parsed = parse_gemini_response(clean_text, safe_name)
                 
                 if parsed:
                     all_data.extend(parsed) 
-                    print(f"DEBUG: Successfully extracted {len(parsed)} rows from {safe_name}")
-                else:
-                    print(f"DEBUG: AI returned empty data for {safe_name}")
-
-                # --- WAIT FOR GOOGLE SERVERS ---
+                
                 if index < len(files) - 1:
-                    print("Waiting 20 seconds for API cooldown...")
-                    sleep_time.sleep(20)  # <--- THIS IS THE FIX
-                # -----------------------------
+                    sleep_time.sleep(20)
 
             except Exception as e:
                 print(f"CRITICAL ERROR processing file {safe_name}: {e}")
                 continue 
         
-        # 3. Check if we got any data
         if not all_data:
             flash("No data could be extracted. Check terminal for errors.", "error")
             return redirect(url_for('index'))
             
-        # 4. Save
-        print(f"DEBUG: Final saving. Total rows collected: {len(all_data)}")
         temp_name = f"temp_{uuid.uuid4().hex}.json"
         with open(os.path.join(app.config['OUTPUT_FOLDER'], temp_name), 'w') as f:
             json.dump(all_data, f)
@@ -842,7 +685,6 @@ def preview_data(temp_file):
         
         preview_rows = []
         equip_count = 0
-        row_count = 1
         curr_drawing = ""
         
         for d in raw:
@@ -869,7 +711,6 @@ def preview_data(temp_file):
                 'source_drawing': d.get('source_drawing')
             }
             preview_rows.append(row)
-            row_count += 1
             
         return render_template('preview.html', data_rows=preview_rows, equipment_count=equip_count, temp_file=temp_file)
     except Exception as e:
@@ -892,7 +733,6 @@ def save_data():
     try:
         def get_vals(name): return [x.strip() for x in request.form.getlist(name)]
         
-        # 1. Collect Data from Form
         rows = []
         parts = get_vals('PARTS') 
         
@@ -916,7 +756,6 @@ def save_data():
                 'source_drawing': request.form.getlist('source_drawing')[i]
             })
 
-        # 2. Save to Database (Full Data)
         history = History(created_by_user_id=current_user.user_id)
         db.session.add(history)
         db.session.flush()
@@ -943,14 +782,12 @@ def save_data():
                 phase=r['PHASE']
             ))
 
-        # 3. Prepare Data for Excel (Blanking duplicates for merging)
+        # Excel Export Logic
         excel_rows = []
         prev_equip_no = None
-        
         for r in rows:
             row_copy = r.copy()
             curr_equip = r['EQUIPMENT NO. ']
-            
             if curr_equip == prev_equip_no:
                 row_copy['NO.'] = ""
                 row_copy['EQUIPMENT NO. '] = ""
@@ -959,10 +796,8 @@ def save_data():
                 row_copy['PHASE'] = ""
             else:
                 prev_equip_no = curr_equip
-            
             excel_rows.append(row_copy)
 
-        # 4. Write to Excel
         filename = f"{history.history_id}_output.xlsx"
         filepath = os.path.join(app.config['OUTPUT_FOLDER'], filename)
         
@@ -976,27 +811,21 @@ def save_data():
         with pd.ExcelWriter(filepath, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
             df.to_excel(writer, sheet_name=TARGET_SHEET, startrow=start_row, index=False, header=False)
 
-        # 5. Apply Merging Logic
+        # Merge Cells
         wb = load_workbook(filepath)
         ws = wb[TARGET_SHEET]
-        
         cols_to_merge = [1, 2, 3, 4]
-        
         row = 2 
         max_row = ws.max_row
 
         while row <= max_row:
             cell_val = ws.cell(row=row, column=2).value
-            
             if cell_val:
                 start_merge_row = row
                 next_row = row + 1
-                
                 while next_row <= max_row and not ws.cell(row=next_row, column=2).value:
                     next_row += 1
-                
                 end_merge_row = next_row - 1
-                
                 if end_merge_row > start_merge_row:
                     for col_idx in cols_to_merge:
                         ws.merge_cells(start_row=start_merge_row, start_column=col_idx, end_row=end_merge_row, end_column=col_idx)
@@ -1006,14 +835,12 @@ def save_data():
                     for col_idx in cols_to_merge:
                         cell = ws.cell(row=start_merge_row, column=col_idx)
                         cell.alignment = Alignment(horizontal='center', vertical='center')
-                        
                 row = next_row
             else:
                 row += 1
         
         wb.save(filepath)
 
-        # 6. Finalize
         history.excel_filename = filename
         db.session.commit()
         
@@ -1026,7 +853,6 @@ def save_data():
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error saving: {e}")
         flash(f"Error saving: {e}", "error")
         return redirect(url_for('manual_input'))
 
@@ -1038,7 +864,6 @@ def download_file(filename):
 @app.route('/notifications')
 @login_required
 def notifications():
-    # --- CHANGE: Show announcements visible to Engineer OR Manager ---
     anns = Announcement.query.filter((Announcement.visible_to_engineer == True) | (Announcement.visible_to_manager == True)).order_by(Announcement.created_at.desc()).all()
     return render_template('notification.html', announcements=anns)
 
@@ -1065,29 +890,23 @@ def personal_info():
 def download_announcement(filename):
     return send_from_directory(app.config['ANNOUNCEMENT_FOLDER'], filename, as_attachment=True)
 
-# ==================================================================
-# ====================== MANAGER-ONLY ROUTES =======================
-# ==================================================================
+# ==================== MANAGER ROUTES ==================
 
 @app.route('/manager/dashboard')
 @login_required
 @manager_required
 def manager_dashboard():
-    # --- ADDED: Manager Dashboard Logic ---
     total_batches = History.query.count()
     total_parts = EquipmentData.query.count()
-    
     engineer_role = Role.query.filter_by(role_name='Engineer').first()
     engineer_count = User.query.filter_by(role_id=engineer_role.role_id).count() if engineer_role else 0
-
     recent_activity = History.query.order_by(History.created_at.desc()).limit(5).all()
     
-    # Engineer Leaderboard (Top 3 contributors by batch count)
     top_engineers = db.session.query(
         User.name, 
         func.count(History.history_id).label('batch_count')
     ).join(History, User.user_id == History.created_by_user_id
-    ).filter(User.role_id == engineer_role.role_id if engineer_role else True) .group_by(User.name
+    ).filter(User.role_id == engineer_role.role_id if engineer_role else True).group_by(User.name
     ).order_by(func.count(History.history_id).desc()
     ).limit(3).all()
 
@@ -1118,31 +937,23 @@ def manager_reports():
 def manager_review_queue():
     return render_template('manager_placeholder.html', title='Final Review Queue')
 
-# ==================================================================
-# ======================= ADMIN-ONLY ROUTES ========================
-# ==================================================================
+# ==================== ADMIN ROUTES ==================
 
 @app.route('/admin/dashboard')
 @login_required
 @admin_required
 def admin_dashboard():
-    # --- ADDED: Admin Dashboard Logic ---
     u_count = User.query.count()
-    
     admin_role = Role.query.filter_by(role_name='Admin').first()
     admin_count = User.query.filter_by(role_id=admin_role.role_id).count() if admin_role else 0
-
     manager_role = Role.query.filter_by(role_name='Manager').first()
     manager_count = User.query.filter_by(role_id=manager_role.role_id).count() if manager_role else 0
-    
     engineer_role = Role.query.filter_by(role_name='Engineer').first()
     engineer_count = User.query.filter_by(role_id=engineer_role.role_id).count() if engineer_role else 0
-
     f_total = History.query.count()
     today = datetime.utcnow().date()
     f_today = History.query.filter(History.created_at >= datetime.combine(today, time.min), History.created_at <= datetime.combine(today, time.max)).count()
     recent = User.query.order_by(User.user_id.desc()).limit(5).all()
-    
     return render_template('dashboard_admin.html', user_count=u_count, admin_count=admin_count, manager_count=manager_count, engineer_count=engineer_count, file_count_total=f_total, file_count_today=f_today, recent_users=recent)
 
 @app.route('/admin/create-user', methods=['GET', 'POST'])
@@ -1180,7 +991,6 @@ def admin_announcement():
 @login_required
 @admin_required
 def admin_history():
-    # Fetch all history records, newest first
     items = History.query.order_by(History.created_at.desc()).all()
     return render_template('history_admin.html', histories=items)
 
@@ -1188,7 +998,6 @@ def admin_history():
 @login_required
 @admin_required
 def admin_reports():
-    # Placeholder for future Reports functionality
     flash("The Reports module is currently under construction.", "info")
     return redirect(url_for('admin_dashboard'))
 
@@ -1196,7 +1005,6 @@ def admin_reports():
 @login_required
 @admin_required
 def admin_review_queue():
-    # Placeholder for future Review Queue functionality
     flash("The Review Queue module is currently under construction.", "info")
     return redirect(url_for('admin_dashboard'))
 
@@ -1204,44 +1012,33 @@ def admin_review_queue():
 @login_required
 @admin_required
 def admin_statistics():
-    # This page is not ready yet, so we redirect back to the dashboard
     flash("The Statistics page is currently under construction.", "info")
     return redirect(url_for('admin_dashboard'))
 
-# --- CLI COMMANDS ---
 @app.cli.command('init-db')
 @click.option('--drop', is_flag=True)
 def init_db(drop):
     if drop: db.drop_all()
     db.create_all()
     if not Role.query.first():
-        # 1. Create Roles
         m = Role(role_name='Manager')
         e = Role(role_name='Engineer')
         a = Role(role_name="Admin")
         db.session.add_all([m, e, a])
         db.session.commit()
         
-        # 2. Create Users (With CORRECT variable names)
-        
-        # Manager
         manager_user = User(username='manager@ipetro.com', name='Manager', email='manager@ipetro.com', role_id=m.role_id)
         manager_user.set_password('abc1234')
         
-        # Engineer
         eng_user = User(username='engineer@ipetro.com', name='Eng', email='engineer@ipetro.com', role_id=e.role_id)
         eng_user.set_password('abc1234')
         
-        # Admin
         admin_user = User(username='admin@ipetro.com', name='Admin', email='Admin@ipetro.com', role_id=a.role_id)
         admin_user.set_password('abc1234')
         
-        # 3. Add all unique variables to session
         db.session.add_all([manager_user, eng_user, admin_user])
         db.session.commit()
-        
     print("DB Initialized.")
 
-# --- Main Application Runner ---
 if __name__ == '__main__':
     app.run(debug=True)

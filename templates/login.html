@@ -13,17 +13,12 @@
         body {
             font-family: 'Inter', sans-serif;
         }
-        /* Custom style to make select padding work with icons */
-        select {
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-        }
     </style>
 </head>
 <body class="bg-white">
     <div class="flex min-h-screen">
 
+        <!-- Left Side (Banner) -->
         <div class="hidden md:flex md:w-1/2 bg-gradient-to-tr from-blue-600 to-blue-800 text-white p-12 flex-col justify-center items-center">
             <div class="text-center max-w-md">
                 
@@ -38,6 +33,7 @@
             </div>
         </div>
 
+        <!-- Right Side (Form) -->
         <div class="w-full md:w-1/2 flex flex-col justify-center items-center p-8 sm:p-12 bg-gray-50">
             <div class="max-w-md w-full">
                 
@@ -76,25 +72,7 @@
                         </div>
                     </div>
 
-                    <div class="mb-4">
-                        <label for="role" class="block text-sm font-medium text-gray-700 mb-2">
-                            Role
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <i data-lucide="user-check" class="w-5 h-5 text-gray-400"></i>
-                            </div>
-                            <select id="role" name="role"
-                                   class="w-full pl-12 pr-10 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                   required>
-                                <option value="Admin">Admin</option> <option value="Manager">Manager</option>
-                                <option value="Engineer">Engineer</option>
-                            </select>
-                            <div class="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
-                                <i data-lucide="chevron-down" class="w-5 h-5 text-gray-400"></i>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Role Selection Removed Here -->
 
                     <div class="mb-6">
                         <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
