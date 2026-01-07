@@ -36,6 +36,7 @@ from functools import wraps
 from pptx import Presentation
 from pptx.util import Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from flask_mail import Mail, Message
 
 # --- LOAD ENVIRONMENT VARIABLES (Reading from .env) ---
 load_dotenv()
@@ -55,6 +56,15 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'a-super-secret-key-that-is-hard-to-guess'
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# --- MAIL CONFIGURATION ---
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
+
+mail = Mail(app)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
@@ -148,22 +158,24 @@ def duplicate_slide(pres, index):
 
     return dest
 
-@app.route('/generate_ppt/<filename>')
-@login_required
-def generate_ppt(filename):
+def generate_ppt_internal(filename):
+    """
+    Internal function to generate the PPT file. 
+    Returns the path to the generated file, or None if failed.
+    """
+    # 1. Path Setup
     excel_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
     template_path = os.path.join(app.root_path, 'Inspection Plan Powerpoint Template.pptx')
     output_pptx_name = f"Inspection_Plan_{filename.replace('.xlsx', '.pptx')}"
     output_pptx_path = os.path.join(app.config['OUTPUT_FOLDER'], output_pptx_name)
 
-    if not os.path.exists(excel_path):
-        flash("Excel file missing.", "error")
-        return redirect(url_for('index'))
-    if not os.path.exists(template_path):
-        flash("PPT template missing.", "error")
-        return redirect(url_for('index'))
+    # 2. Check Files
+    if not os.path.exists(excel_path) or not os.path.exists(template_path):
+        return None
 
-    # --- PPT Generation Logic ---
+    # ==========================================
+    # PASS 1: EXTRACT METADATA (Tag, PMT, Desc)
+    # ==========================================
     tag_val, pmt_val, desc_val = "", "", ""
     try:
         df_meta = pd.read_excel(excel_path, header=None, nrows=15)
@@ -181,8 +193,13 @@ def generate_ppt(filename):
                     elif c_idx+2 < len(row): desc_val = str(row[c_idx+2])
     except: pass
 
+    # ==========================================
+    # PASS 2: CONTENT-AWARE SCANNING
+    # ==========================================
     try:
         df_raw = pd.read_excel(excel_path, header=None)
+        
+        # 1. Find the Anchor Row
         anchor_idx = None
         for idx, row in df_raw.iterrows():
             r_str = row.astype(str).str.upper().tolist()
@@ -190,10 +207,9 @@ def generate_ppt(filename):
                 anchor_idx = idx
                 break
         
-        if anchor_idx is None:
-            flash("Could not find table headers (TYPE/SPEC).", "error")
-            return redirect(url_for('index'))
+        if anchor_idx is None: return None
 
+        # 2. Slice Data
         df_data = df_raw.iloc[anchor_idx + 1:].copy().reset_index(drop=True)
         df_data = df_data.fillna('-')
         
@@ -202,14 +218,14 @@ def generate_ppt(filename):
         if anchor_idx > 0:
             header_row_main = df_raw.iloc[anchor_idx-1].astype(str).str.upper().tolist()
 
+        # 3. IDENTIFY COLUMNS (Your "Victory Logic")
         idx_fluid, idx_part = None, None
         idx_type, idx_spec, idx_grade = None, None, None
-        idx_insul = None
-        idx_temp, idx_press = None, None
+        idx_insul, idx_temp, idx_press = None, None, None
 
         num_cols = df_data.shape[1]
         
-        # --- Column Identification Logic ---
+        # A. Find PARTS
         best_part_score = -1
         for c in range(num_cols):
             score = 0
@@ -222,6 +238,7 @@ def generate_ppt(filename):
                 best_part_score = score
                 idx_part = c
 
+        # B. Find MATERIAL TYPE
         best_type_score = -1
         for c in range(num_cols):
             score = 0
@@ -233,25 +250,40 @@ def generate_ppt(filename):
                 best_type_score = score
                 idx_type = c
 
+        # C. Find FLUID
         for c in range(min(len(header_row_main), num_cols)):
             if "FLUID" in header_row_main[c] or "MEDIA" in header_row_main[c]:
                 idx_fluid = c
                 break
-        if idx_fluid is None: idx_fluid = 0
+        if idx_fluid is None: idx_fluid = 0 # Fallback
 
+        # D. Find INSULATION
         for c in range(min(len(header_row_main), num_cols)):
             if "INSUL" in header_row_main[c]: 
                 idx_insul = c
                 break
+        if idx_insul is None:
+            best_ins_score = -1
+            for c in range(num_cols):
+                if c in [idx_part, idx_type, idx_fluid]: continue
+                score = 0
+                for val in df_data.iloc[:10, c]:
+                    v = str(val).upper()
+                    if v in ['N/A', 'YES', 'NO', 'NA']: score += 3
+                if score > best_ins_score and score > 0:
+                    best_ins_score = score
+                    idx_insul = c
 
+        # E. Find SPEC and GRADE
         for c in range(min(len(header_row_sub), num_cols)):
             if "SPEC" in header_row_sub[c]: idx_spec = c
             if "GRADE" in header_row_sub[c] or "GR." in header_row_sub[c] or header_row_sub[c] == "GR": idx_grade = c
-            
+        
         if idx_type is not None:
             if idx_spec is None: idx_spec = idx_type + 1
             if idx_grade is None: idx_grade = idx_type + 2
             
+        # F. Find TEMP / PRESS
         for c in range(num_cols):
             h_main = header_row_main[c] if c < len(header_row_main) else ""
             h_sub = header_row_sub[c] if c < len(header_row_sub) else ""
@@ -260,6 +292,7 @@ def generate_ppt(filename):
             if "TEMP" in full_head or "T (C)" in full_head: idx_temp = c
             if "PRESS" in full_head or "P (MPA)" in full_head: idx_press = c
 
+        # 4. Filter Data
         if idx_part is not None:
              df_data = df_data[
                 (df_data[idx_part].astype(str).str.strip() != '-') & 
@@ -269,9 +302,12 @@ def generate_ppt(filename):
             ]
 
     except Exception as e:
-        flash(f"Error processing data: {e}", "error")
-        return redirect(url_for('index'))
+        print(f"PPT Generation Error: {e}")
+        return None
 
+    # ==========================================
+    # GENERATE POWERPOINT
+    # ==========================================
     prs = Presentation(template_path)
     MAX_ROWS = 5
     data_rows = [row for _, row in df_data.iterrows()]
@@ -318,22 +354,16 @@ def generate_ppt(filename):
                 
                 val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
                 _set_cell_text(cells[0], val_fluid, 9)
-                
                 val_part = row_data.get(idx_part, '') if idx_part is not None else ''
                 _set_cell_text(cells[1], val_part, 9)
-                
                 _set_cell_text(cells[2], "", 9) 
-                
                 _set_cell_text(cells[3], row_data.get(idx_type, ''), 9)
                 _set_cell_text(cells[4], row_data.get(idx_spec, ''), 9)
                 _set_cell_text(cells[5], row_data.get(idx_grade, ''), 9)
-                
                 val_ins = row_data.get(idx_insul, '') if idx_insul is not None else ''
                 _set_cell_text(cells[6], val_ins, 9)
-                
                 val_temp = row_data.get(idx_temp, '') if idx_temp is not None else ''
                 _set_cell_text(cells[7], val_temp, 9)
-                
                 val_press = row_data.get(idx_press, '') if idx_press is not None else ''
                 _set_cell_text(cells[8], val_press, 9)
 
@@ -344,7 +374,20 @@ def generate_ppt(filename):
                         _set_cell_text(cell, "", 9)
 
     prs.save(output_pptx_path)
-    return send_file(output_pptx_path, as_attachment=True)
+    return output_pptx_path
+
+# ==================== MAIN ROUTE (UPDATED) ==================
+
+@app.route('/generate_ppt/<filename>')
+@login_required
+def generate_ppt(filename):
+    # This route now just calls the internal function
+    path = generate_ppt_internal(filename)
+    if path and os.path.exists(path):
+        return send_file(path, as_attachment=True)
+    else:
+        flash("Error generating PowerPoint file.", "error")
+        return redirect(url_for('index'))
 
 # ==================== DATABASE MODELS ==================
 class Role(db.Model):
@@ -890,6 +933,53 @@ def personal_info():
 def download_announcement(filename):
     return send_from_directory(app.config['ANNOUNCEMENT_FOLDER'], filename, as_attachment=True)
 
+@app.route('/send_files_email', methods=['POST'])
+@login_required
+def send_files_email():
+    recipient = request.form.get('recipient_email')
+    excel_file = request.form.get('excel_filename')
+    
+    # Construct paths
+    excel_path = os.path.join(app.config['OUTPUT_FOLDER'], excel_file)
+    ppt_filename = f"Inspection_Plan_{excel_file.replace('.xlsx', '.pptx')}"
+    ppt_path = os.path.join(app.config['OUTPUT_FOLDER'], ppt_filename)
+
+    if not recipient:
+        flash("Please enter an email address.", "error")
+        return redirect(url_for('index'))
+
+    # --- CRITICAL FIX: GENERATE PPT IF MISSING ---
+    if not os.path.exists(ppt_path):
+        print("PPT missing, generating now...")
+        generated_path = generate_ppt_internal(excel_file)
+        if not generated_path:
+            flash("Warning: Could not generate PowerPoint attachment.", "error")
+    # ---------------------------------------------
+
+    try:
+        msg = Message("Generated Inspection Files", recipients=[recipient])
+        msg.body = f"Hello,\n\nPlease find attached the generated Inspection Plan and Excel Data for {excel_file}.\n\nSent from iPetro System."
+
+        # Attach Excel
+        if os.path.exists(excel_path):
+            with app.open_resource(excel_path) as fp:
+                msg.attach(excel_file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fp.read())
+        
+        # Attach PowerPoint
+        if os.path.exists(ppt_path):
+            with app.open_resource(ppt_path) as fp:
+                msg.attach(ppt_filename, "application/vnd.openxmlformats-officedocument.presentationml.presentation", fp.read())
+        else:
+            msg.body += "\n\n(Note: PowerPoint file could not be generated and is missing from this email.)"
+
+        mail.send(msg)
+        flash(f"Email successfully sent to {recipient}!", "success")
+        
+    except Exception as e:
+        print(f"Email Error: {e}")
+        flash(f"Failed to send email: {e}", "error")
+
+    return redirect(url_for('index'))
 # ==================== MANAGER ROUTES ==================
 
 @app.route('/manager/dashboard')
