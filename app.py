@@ -15,6 +15,8 @@ from flask_migrate import Migrate
 from datetime import datetime, time
 from sqlalchemy import func
 from dotenv import load_dotenv
+from pptx.util import Pt, Inches  # <--- Make sure Inches is added here
+from pptx.enum.text import PP_ALIGN
 
 import pandas as pd
 import pdf2image
@@ -25,6 +27,8 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment 
 import shutil
 import time as sleep_time 
+import tempfile
+from pptx.util import Inches
 
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField, SelectField, TextAreaField, BooleanField
@@ -37,6 +41,7 @@ from pptx import Presentation
 from pptx.util import Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from flask_mail import Mail, Message
+from PIL import Image
 
 # --- LOAD ENVIRONMENT VARIABLES (Reading from .env) ---
 load_dotenv()
@@ -168,8 +173,9 @@ def duplicate_slide(pres, index):
 
 def generate_ppt_internal(filename):
     """
-    Internal function to generate the PPT file. 
-    Returns the path to the generated file, or None if failed.
+    Internal function to generate the PPT file with:
+    1. Data Slide(s) (Table with Text Overlays)
+    2. ONE Final Drawing Slide (Cropped to show only the drawing on the LEFT)
     """
     # 1. Path Setup
     excel_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
@@ -182,27 +188,7 @@ def generate_ppt_internal(filename):
         return None
 
     # ==========================================
-    # PASS 1: EXTRACT METADATA (Tag, PMT, Desc)
-    # ==========================================
-    tag_val, pmt_val, desc_val = "", "", ""
-    try:
-        df_meta = pd.read_excel(excel_path, header=None, nrows=15)
-        for r_idx, row in df_meta.iterrows():
-            for c_idx, cell in enumerate(row):
-                s = str(cell).strip().upper()
-                if any(x in s for x in ["TAG NO", "TAG. NO", "EQUIPMENT NO"]) and not tag_val:
-                    if c_idx+1 < len(row) and str(row[c_idx+1]).strip() not in ['nan', '']: tag_val = str(row[c_idx+1])
-                    elif c_idx+2 < len(row): tag_val = str(row[c_idx+2])
-                if any(x in s for x in ["PMT NO", "PMT. NO"]) and not pmt_val:
-                    if c_idx+1 < len(row) and str(row[c_idx+1]).strip() not in ['nan', '']: pmt_val = str(row[c_idx+1])
-                    elif c_idx+2 < len(row): pmt_val = str(row[c_idx+2])
-                if any(x in s for x in ["DESCRIPTION", "DESC."]) and not desc_val:
-                    if c_idx+1 < len(row) and str(row[c_idx+1]).strip() not in ['nan', '']: desc_val = str(row[c_idx+1])
-                    elif c_idx+2 < len(row): desc_val = str(row[c_idx+2])
-    except: pass
-
-    # ==========================================
-    # PASS 2: CONTENT-AWARE SCANNING
+    # DATA PROCESSING
     # ==========================================
     try:
         df_raw = pd.read_excel(excel_path, header=None)
@@ -219,171 +205,216 @@ def generate_ppt_internal(filename):
 
         # 2. Slice Data
         df_data = df_raw.iloc[anchor_idx + 1:].copy().reset_index(drop=True)
-        df_data = df_data.fillna('-')
         
         header_row_sub = df_raw.iloc[anchor_idx].astype(str).str.upper().tolist()
         header_row_main = []
         if anchor_idx > 0:
             header_row_main = df_raw.iloc[anchor_idx-1].astype(str).str.upper().tolist()
 
-        # 3. IDENTIFY COLUMNS (Your "Victory Logic")
+        # 3. IDENTIFY COLUMNS
         idx_fluid, idx_part = None, None
         idx_type, idx_spec, idx_grade = None, None, None
         idx_insul, idx_temp, idx_press = None, None, None
+        idx_equip_no, idx_pmt_no, idx_desc = None, None, None
 
         num_cols = df_data.shape[1]
         
-        # A. Find PARTS
-        best_part_score = -1
-        for c in range(num_cols):
-            score = 0
-            for val in df_data.iloc[:10, c]:
-                v = str(val).upper()
-                if any(k in v for k in ['HEAD', 'SHELL', 'PIPE', 'FLANGE', 'PLATE']): score += 2
-                if 'V-' in v: score -= 5
-            if c < len(header_row_main) and 'PARTS' in header_row_main[c]: score += 10
-            if score > best_part_score:
-                best_part_score = score
-                idx_part = c
-
-        # B. Find MATERIAL TYPE
-        best_type_score = -1
-        for c in range(num_cols):
-            score = 0
-            for val in df_data.iloc[:10, c]:
-                v = str(val).upper()
-                if any(k in v for k in ['STAINLESS', 'CARBON', 'STEEL']): score += 2
-            if c < len(header_row_sub) and 'TYPE' in header_row_sub[c]: score += 10
-            if score > best_type_score:
-                best_type_score = score
-                idx_type = c
-
-        # C. Find FLUID
-        for c in range(min(len(header_row_main), num_cols)):
-            if "FLUID" in header_row_main[c] or "MEDIA" in header_row_main[c]:
-                idx_fluid = c
-                break
-        if idx_fluid is None: idx_fluid = 0 # Fallback
-
-        # D. Find INSULATION
-        for c in range(min(len(header_row_main), num_cols)):
-            if "INSUL" in header_row_main[c]: 
-                idx_insul = c
-                break
-        if idx_insul is None:
-            best_ins_score = -1
-            for c in range(num_cols):
-                if c in [idx_part, idx_type, idx_fluid]: continue
-                score = 0
-                for val in df_data.iloc[:10, c]:
-                    v = str(val).upper()
-                    if v in ['N/A', 'YES', 'NO', 'NA']: score += 3
-                if score > best_ins_score and score > 0:
-                    best_ins_score = score
-                    idx_insul = c
-
-        # E. Find SPEC and GRADE
-        for c in range(min(len(header_row_sub), num_cols)):
-            if "SPEC" in header_row_sub[c]: idx_spec = c
-            if "GRADE" in header_row_sub[c] or "GR." in header_row_sub[c] or header_row_sub[c] == "GR": idx_grade = c
-        
-        if idx_type is not None:
-            if idx_spec is None: idx_spec = idx_type + 1
-            if idx_grade is None: idx_grade = idx_type + 2
-            
-        # F. Find TEMP / PRESS
         for c in range(num_cols):
             h_main = header_row_main[c] if c < len(header_row_main) else ""
             h_sub = header_row_sub[c] if c < len(header_row_sub) else ""
-            full_head = (h_main + " " + h_sub)
-            if "DESIGN" in full_head: continue
-            if "TEMP" in full_head or "T (C)" in full_head: idx_temp = c
-            if "PRESS" in full_head or "P (MPA)" in full_head: idx_press = c
+            full_head = (h_main + " " + h_sub).upper()
 
-        # 4. Filter Data
+            if "EQUIPMENT NO" in full_head or "EQUIP NO" in full_head: idx_equip_no = c
+            if "PMT" in full_head: idx_pmt_no = c
+            if "DESCRIPTION" in full_head or "DESC" in full_head: idx_desc = c
+            if "FLUID" in full_head: idx_fluid = c
+            if "INSUL" in full_head: idx_insul = c
+            if "SPEC" in full_head: idx_spec = c
+            if "GRADE" in full_head or "GR." in full_head or h_sub == "GR": idx_grade = c
+            if "TEMP" in full_head and "DESIGN" not in full_head: idx_temp = c
+            if "PRESS" in full_head and "DESIGN" not in full_head: idx_press = c
+            if "TYPE" in h_sub: idx_type = c
+            if "PARTS" in full_head: idx_part = c
+
+        # Fallbacks
+        if idx_equip_no is None: idx_equip_no = 1
+        if idx_pmt_no is None: idx_pmt_no = 2
+        if idx_desc is None: idx_desc = 3
+        if idx_part is None: idx_part = 4
+        if idx_fluid is None: idx_fluid = 6
+
+        # 4. FIX: FORWARD FILL METADATA
+        cols_to_fill = []
+        if idx_equip_no is not None: cols_to_fill.append(idx_equip_no)
+        if idx_pmt_no is not None: cols_to_fill.append(idx_pmt_no)
+        if idx_desc is not None: cols_to_fill.append(idx_desc)
+
+        for col in cols_to_fill:
+             if col < df_data.shape[1]:
+                df_data.iloc[:, col] = df_data.iloc[:, col].replace(['', '-', 'nan', 'None'], pd.NA)
+                df_data.iloc[:, col] = df_data.iloc[:, col].ffill()
+                df_data.iloc[:, col] = df_data.iloc[:, col].fillna('')
+
+        df_data = df_data.fillna('-')
+
+        # Filter Empty Rows
         if idx_part is not None:
              df_data = df_data[
                 (df_data[idx_part].astype(str).str.strip() != '-') & 
-                (df_data[idx_part].astype(str).str.strip() != '') &
-                (df_data[idx_part].astype(str).str.strip() != 'nan') &
-                (df_data[idx_part].astype(str).str.strip().str.upper() != 'COMPONENT') 
+                (df_data[idx_part].astype(str).str.strip() != '') 
             ]
 
     except Exception as e:
-        print(f"PPT Generation Error: {e}")
+        print(f"PPT Generation Error (Data): {e}")
         return None
 
     # ==========================================
     # GENERATE POWERPOINT
     # ==========================================
-    prs = Presentation(template_path)
-    MAX_ROWS = 5
-    data_rows = [row for _, row in df_data.iterrows()]
-    chunks = [data_rows[i:i + MAX_ROWS] for i in range(0, len(data_rows), MAX_ROWS)] if data_rows else [[]]
+    try:
+        prs = Presentation(template_path)
+        MAX_ROWS = 5
+        data_rows = [row for _, row in df_data.iterrows()]
+        chunks = [data_rows[i:i + MAX_ROWS] for i in range(0, len(data_rows), MAX_ROWS)] if data_rows else [[]]
 
-    for i, chunk in enumerate(chunks):
-        if i == 0: slide = prs.slides[0]
-        else: slide = duplicate_slide(prs, 0)
-        
-        # Fill Header
-        for shape in slide.shapes:
-            if not shape.has_table: continue
-            tbl = shape.table
-            try:
-                r0 = " ".join([c.text_frame.text.upper() for c in tbl.rows[0].cells])
-                if "TAG" in r0 or "DESC" in r0:
-                    for row in tbl.rows:
-                        for idx, cell in enumerate(row.cells):
-                            txt = cell.text_frame.text.strip().upper()
-                            if "TAG" in txt and idx+1 < len(row.cells): _set_cell_text(row.cells[idx+1], tag_val)
-                            elif "PMT" in txt and idx+1 < len(row.cells): _set_cell_text(row.cells[idx+1], pmt_val)
-                            elif "DESCRIPTION" in txt and idx+1 < len(row.cells): _set_cell_text(row.cells[idx+1], desc_val)
-            except: pass
+        # GLOBAL VARIABLES FOR DRAWING
+        final_drawing_filename = ""
 
-        # Fill Data
-        main_table = None
-        for shape in slide.shapes:
-            if shape.has_table:
-                try:
-                    r0 = " ".join([c.text_frame.text.upper() for c in shape.table.rows[0].cells])
-                    if "COMPONENT" in r0 and "FLUID" in r0:
-                        main_table = shape.table
-                        break
-                except: continue
-        
-        if main_table:
-            start_row = 2
-            while len(main_table.rows) < (start_row + MAX_ROWS):
-                add_new_row(main_table)
+        # --- PART 1: GENERATE DATA SLIDES ---
+        for i, chunk in enumerate(chunks):
+            if i == 0: slide = prs.slides[0]
+            else: slide = duplicate_slide(prs, 0)
             
-            for idx_in_chunk, row_data in enumerate(chunk):
-                curr_idx = start_row + idx_in_chunk
-                cells = main_table.rows[curr_idx].cells
+            first_row = chunk[0] if chunk else None
+            current_tag = ""
+            current_pmt = ""
+            current_desc = ""
+
+            if first_row is not None:
+                if idx_equip_no is not None: current_tag = str(first_row.get(idx_equip_no, '')).strip()
+                if idx_pmt_no is not None: 
+                    current_pmt = str(first_row.get(idx_pmt_no, '')).strip()
+                    # SAVE FILENAME FOR LATER
+                    if not final_drawing_filename and current_pmt and current_pmt != '-':
+                        final_drawing_filename = current_pmt + ".pdf"
+                        
+                if idx_desc is not None: current_desc = str(first_row.get(idx_desc, '')).strip()
+
+            # Text Overlays
+            txBox_desc = slide.shapes.add_textbox(Inches(3.3), Inches(0.55), Inches(3.5), Inches(0.4))
+            tf_desc = txBox_desc.text_frame
+            tf_desc.text = current_desc
+            tf_desc.paragraphs[0].font.size = Pt(8)
+            tf_desc.paragraphs[0].font.name = 'Arial'
+            tf_desc.paragraphs[0].font.bold = True
+
+            txBox_tag = slide.shapes.add_textbox(Inches(6.3), Inches(0.55), Inches(1.8), Inches(0.4))
+            tf_tag = txBox_tag.text_frame
+            tf_tag.text = current_tag
+            tf_tag.paragraphs[0].font.size = Pt(8) 
+            tf_tag.paragraphs[0].font.name = 'Arial'
+            tf_tag.paragraphs[0].font.bold = True
+
+            txBox_pmt = slide.shapes.add_textbox(Inches(7.9), Inches(0.55), Inches(1.8), Inches(0.4))
+            tf_pmt = txBox_pmt.text_frame
+            tf_pmt.text = current_pmt
+            tf_pmt.paragraphs[0].font.size = Pt(6)
+            tf_pmt.paragraphs[0].font.name = 'Arial'
+            tf_pmt.paragraphs[0].font.bold = True
+
+            # Fill Table
+            main_table = None
+            for shape in slide.shapes:
+                if shape.has_table:
+                    try:
+                        r0 = " ".join([c.text_frame.text.upper() for c in shape.table.rows[0].cells])
+                        if "COMPONENT" in r0 and "FLUID" in r0:
+                            main_table = shape.table
+                            break
+                    except: continue
+            
+            if main_table:
+                start_row = 2
+                while len(main_table.rows) < (start_row + MAX_ROWS):
+                    add_new_row(main_table)
                 
-                val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
-                _set_cell_text(cells[0], val_fluid, 9)
-                val_part = row_data.get(idx_part, '') if idx_part is not None else ''
-                _set_cell_text(cells[1], val_part, 9)
-                _set_cell_text(cells[2], "", 9) 
-                _set_cell_text(cells[3], row_data.get(idx_type, ''), 9)
-                _set_cell_text(cells[4], row_data.get(idx_spec, ''), 9)
-                _set_cell_text(cells[5], row_data.get(idx_grade, ''), 9)
-                val_ins = row_data.get(idx_insul, '') if idx_insul is not None else ''
-                _set_cell_text(cells[6], val_ins, 9)
-                val_temp = row_data.get(idx_temp, '') if idx_temp is not None else ''
-                _set_cell_text(cells[7], val_temp, 9)
-                val_press = row_data.get(idx_press, '') if idx_press is not None else ''
-                _set_cell_text(cells[8], val_press, 9)
+                for idx_in_chunk, row_data in enumerate(chunk):
+                    curr_idx = start_row + idx_in_chunk
+                    cells = main_table.rows[curr_idx].cells
+                    val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
+                    _set_cell_text(cells[0], val_fluid, 9)
+                    val_part = row_data.get(idx_part, '') if idx_part is not None else ''
+                    _set_cell_text(cells[1], val_part, 9)
+                    _set_cell_text(cells[2], "", 9) 
+                    _set_cell_text(cells[3], row_data.get(idx_type, ''), 9)
+                    _set_cell_text(cells[4], row_data.get(idx_spec, ''), 9)
+                    _set_cell_text(cells[5], row_data.get(idx_grade, ''), 9)
+                    val_ins = row_data.get(idx_insul, '') if idx_insul is not None else ''
+                    _set_cell_text(cells[6], val_ins, 9)
+                    val_temp = row_data.get(idx_temp, '') if idx_temp is not None else ''
+                    _set_cell_text(cells[7], val_temp, 9)
+                    val_press = row_data.get(idx_press, '') if idx_press is not None else ''
+                    _set_cell_text(cells[8], val_press, 9)
 
-            for j in range(len(chunk), MAX_ROWS):
-                curr_idx = start_row + j
-                if curr_idx < len(main_table.rows):
-                    for cell in main_table.rows[curr_idx].cells:
-                        _set_cell_text(cell, "", 9)
+                for j in range(len(chunk), MAX_ROWS):
+                    curr_idx = start_row + j
+                    if curr_idx < len(main_table.rows):
+                        for cell in main_table.rows[curr_idx].cells:
+                            _set_cell_text(cell, "", 9)
 
-    prs.save(output_pptx_path)
-    return output_pptx_path
+        # --- PART 2: GENERATE ONE DRAWING SLIDE (AT THE END) ---
+        if final_drawing_filename:
+            pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], final_drawing_filename)
+            
+            if os.path.exists(pdf_path):
+                try:
+                    try: blank_slide_layout = prs.slide_layouts[6] 
+                    except: blank_slide_layout = prs.slide_layouts[0] 
+                        
+                    slide_drawing = prs.slides.add_slide(blank_slide_layout)
+                    
+                    poppler_p = app.config.get('POPPLER_PATH') or os.environ.get('POPPLER_PATH')
+                    # Convert only the FIRST page of PDF
+                    images = pdf2image.convert_from_path(pdf_path, first_page=1, last_page=1, dpi=200, poppler_path=poppler_p)
+                    
+                    if images:
+                        img = images[0]
+                        width, height = img.size
+                        
+                        # === UPDATED CROP: KEEP LEFT 80% ===
+                        # This targets the main drawing and removes the right-side columns
+                        
+                        left_crop = width * 0.02   # Start from almost the left edge
+                        top_crop = height * 0.02   # Start from almost the top
+                        right_crop = width * 0.82  # Keep 82% of width (cuts off right tables)
+                        bottom_crop = height * 0.98 # Go down to bottom
+                        
+                        img_cropped = img.crop((left_crop, top_crop, right_crop, bottom_crop))
+                        
+                        # Save temp image
+                        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_img:
+                            img_cropped.save(tmp_img.name, 'JPEG')
+                            tmp_img_path = tmp_img.name
+                        
+                        # Insert Full Height on Slide
+                        ppt_left = Inches(0.5)
+                        ppt_top = Inches(0.5)
+                        ppt_height = Inches(6.5) 
+                        
+                        slide_drawing.shapes.add_picture(tmp_img_path, ppt_left, ppt_top, height=ppt_height)
+                        
+                        try: os.remove(tmp_img_path)
+                        except: pass
 
+                except Exception as e:
+                    print(f"Error adding drawing slide: {e}")
+
+        prs.save(output_pptx_path)
+        return output_pptx_path
+    
+    except Exception as e:
+        print(f"PPT Generation Error (Saving): {e}")
+        return None
 # ==================== MAIN ROUTE (UPDATED) ==================
 
 @app.route('/generate_ppt/<filename>')
@@ -944,8 +975,15 @@ def save_data():
                 prev_equip_no = curr_equip
             excel_rows.append(row_copy)
 
-        filename = f"{history.history_id}_output.xlsx"
+        # --- NEW NAMING LOGIC START ---
+        # Get the name of the first drawing in this batch to use as the filename
+        first_drawing_name = rows[0]['source_drawing'] 
+        # Remove the .pdf extension and clean it up
+        clean_name = os.path.splitext(first_drawing_name)[0]
+        # Create a meaningful filename (e.g., MLK_PMT_10103... .xlsx)
+        filename = f"{clean_name}.xlsx"
         filepath = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+        # --- NEW NAMING LOGIC END ---
         
         shutil.copyfile(TEMPLATE_FILE, filepath)
         book = load_workbook(filepath)

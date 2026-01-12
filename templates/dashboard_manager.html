@@ -65,8 +65,14 @@
                     {% for activity in recent_activity %}
                     <li class="py-3 flex justify-between items-center text-sm">
                         <span class="text-gray-700 font-medium">
-                            Batch #{{ activity.history_id }}
+                            {% if activity.excel_filename %}
+                                <i data-lucide="file-text" class="w-4 h-4 inline mr-1 text-gray-400"></i>
+                                {{ activity.excel_filename.replace('.xlsx', '') }}
+                            {% else %}
+                                Batch #{{ activity.history_id }}
+                            {% endif %}
                         </span>
+                        
                         <div class="text-right">
                             <span class="text-gray-500">
                                 by {{ activity.user.name or activity.user.username }}
