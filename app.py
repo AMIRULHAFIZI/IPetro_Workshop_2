@@ -56,6 +56,14 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'a-super-secret-key-that-is-hard-to-guess'
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# --- DB CONNECTION FIX ---
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_size': 10,       # Keep up to 10 connections in the pool
+    'pool_recycle': 280,   # Recycle connections before the default 300s timeout
+    'pool_pre_ping': True, # Check if the DB is alive before trying to use it
+}
+
 # --- MAIL CONFIGURATION ---
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
@@ -523,11 +531,45 @@ def load_user(user_id):
 
 def get_gemini_prompt():
     return """
-    You are an expert engineering assistant. Analyze these technical drawing images.
-    Extract the following data points and return them as a clean JSON object.
-    1. design_pressure 2. design_temperature 3. operating_pressure 4. operating_temperature 5. fluid
-    6. parts_list: list of objects with "part_name", "material_spec", "material_grade".
-    Example: {"design_pressure": "14 Bar", "parts_list": [{"part_name": "Shell", "material_spec": "SA-516", "material_grade": "70"}]}
+    You are an expert engineering assistant specializing in technical drawing analysis. 
+    Analyze the provided technical drawing images with high precision.
+    
+    Your task is to extract the following technical data points. 
+    Look specifically for "Design Data" tables, "Bill of Materials", "Nozzle Schedules", or general notes.
+    
+    Required Fields:
+    1. design_pressure: Look for "Design Pressure", "Des Press", "P-Design". Return with units (e.g., "14 Bar").
+    2. design_temperature: Look for "Design Temperature", "Des Temp", "T-Design". Return with units (e.g., "100 C").
+    3. operating_pressure: Look for "Operating Pressure", "Op Press", "Working Pressure". Return with units.
+    4. operating_temperature: Look for "Operating Temperature", "Op Temp". Return with units.
+    5. fluid: Look for "Fluid", "Medium", "Contents", "Service".
+    6. insulation: Look for "Insulation", "Insul", "Lagging". Return "Yes"/"No" or thickness/type if found.
+    7. phase: Look for "Phase" (e.g., "Liquid", "Gas", "Vapor").
+    
+    8. parts_list: Extract a list of MAJOR pressure-retaining components (Shell, Head, Channel, Tube Sheet, Pipe). 
+       - For each part, find its "Material Specification" (e.g., SA-516, SA-106) and "Grade" (e.g., 70, B).
+       - Ignore nuts, bolts, gaskets, and minor supports unless major.
+       
+    Output Format:
+    Return ONLY valid JSON. Do not include markdown formatting like ```json ... ```.
+    
+    JSON Schema:
+    {
+      "design_pressure": "Value or 'Not Found'",
+      "design_temperature": "Value or 'Not Found'",
+      "operating_pressure": "Value or 'Not Found'",
+      "operating_temperature": "Value or 'Not Found'",
+      "fluid": "Value or 'Not Found'",
+      "insulation": "Value or 'Not Found'",
+      "phase": "Value or 'Not Found'",
+      "parts_list": [
+        {
+          "part_name": "Name of part",
+          "material_spec": "Spec string",
+          "material_grade": "Grade string"
+        }
+      ]
+    }
     """
 
 def call_gemini_api(images, prompt, api_key):
@@ -540,7 +582,14 @@ def call_gemini_api(images, prompt, api_key):
         img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_base64}})
     
-    payload = {"contents": [{"parts": parts}]}
+    # Updated Payload with Generation Config for JSON enforcement
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
+    
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -552,8 +601,11 @@ def call_gemini_api(images, prompt, api_key):
             sleep_time.sleep(1)
 
 def clean_gemini_response(response_text):
+    # Since we enforce JSON in call_gemini_api, this regex is a fallback
     match = re.search(r'```json\s*([\s\S]+?)\s*```', response_text)
-    return match.group(1) if match else response_text.strip()
+    if match:
+        return match.group(1)
+    return response_text.strip()
 
 def refine_material_type(spec, grade, ai_suggested_type="Not Found"):
     s = str(spec).upper() if spec else ""
@@ -587,6 +639,8 @@ def parse_gemini_response(json_text, drawing_name):
     parts = data.get("parts_list", []) or [{"part_name": "Not Found"}]
     
     fluid = data.get("fluid", "Not Found")
+    phase = data.get("phase", "Not Found")
+    insulation = data.get("insulation", "Not Found")
     design_temp = data.get("design_temperature", "Not Found")
     design_press = data.get("design_pressure", "Not Found")
     op_temp = data.get("operating_temperature", "Not Found")
@@ -601,14 +655,15 @@ def parse_gemini_response(json_text, drawing_name):
             "source_drawing": drawing_name,
             "part_name": part.get("part_name", "Not Found"),
             "fluid": fluid,
+            "phase": phase,
+            "insulation": insulation,
             "material_type": final_type, 
             "material_spec": raw_spec,
             "material_grade": raw_grade,
             'TEMP. (°C) ': design_temp,
             'PRESSURE (Mpa) ': design_press,
             'TEMP. (°C)': op_temp,
-            'PRESSURE (Mpa)': op_press,
-            "insulation": "N/A"
+            'PRESSURE (Mpa)': op_press
         })
     return extracted_data
 
@@ -616,7 +671,6 @@ def parse_gemini_response(json_text, drawing_name):
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
-    # 1. If user is already authenticated, redirect them based on their role immediately
     if current_user.is_authenticated:
         if current_user.role.role_name == 'Admin':
             return redirect(url_for('admin_dashboard'))
@@ -625,18 +679,14 @@ def login():
         else:
             return redirect(url_for('index'))
     
-    # 2. Handle Login Form POST
     if request.method == 'POST':
         username_input = request.form.get('username')
         password_input = request.form.get('password')
 
-        # Find user by username OR email
         user = User.query.filter((User.username == username_input) | (User.email == username_input)).first()
         
         if user and user.check_password(password_input):
             login_user(user)
-            
-            # Redirect based on ROLE (No form input needed)
             if user.role.role_name == 'Admin':
                 return redirect(url_for('admin_dashboard'))
             elif user.role.role_name == 'Manager':
@@ -674,6 +724,9 @@ def upload_file():
     
     files.sort(key=lambda x: x.filename)
     all_data = [] 
+
+    # --- DB CONNECTION FIX ---
+    db.session.remove()
     
     try:
         for index, file in enumerate(files):
@@ -684,7 +737,8 @@ def upload_file():
             file.save(path)
             
             try:
-                images = pdf2image.convert_from_path(path, poppler_path=app.config.get('POPPLER_PATH') or POPPLER_PATH)
+                # Updated to use 300 DPI for better OCR/Vision accuracy
+                images = pdf2image.convert_from_path(path, poppler_path=app.config.get('POPPLER_PATH') or POPPLER_PATH, dpi=300)
                 text = call_gemini_api(images, get_gemini_prompt(), GEMINI_API_KEY)
                 clean_text = clean_gemini_response(text)
                 
@@ -717,7 +771,7 @@ def upload_file():
 @app.route('/preview')
 @login_required
 def preview_page():
-    return render_template('preview.html', data_rows=[], equipment_count=0)
+    return render_template('preview.html', data_rows=[], equipment_count=0, confidence_score=0, missing_fields_count=0)
 
 @app.route('/preview/<temp_file>')
 @login_required
@@ -729,11 +783,47 @@ def preview_data(temp_file):
         preview_rows = []
         equip_count = 0
         curr_drawing = ""
+
+        # --- STATISTICS CALCULATION VARIABLES ---
+        total_critical_fields = 0
+        filled_critical_fields = 0
+        missing_fields_count = 0
         
+        # Fields we expect the AI to find (Added 'insulation' and 'phase')
+        critical_keys = [
+            'part_name', 'fluid', 'material_type', 'material_spec', 
+            'material_grade', 'TEMP. (°C) ', 'PRESSURE (Mpa) ',
+            'insulation', 'phase'
+        ]
+        
+        # List of values that define "Missing Data"
+        missing_indicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE']
+
         for d in raw:
             if d['source_drawing'] != curr_drawing:
                 equip_count += 1
                 curr_drawing = d['source_drawing']
+            
+            # --- CALCULATE SCORE FOR THIS ROW ---
+            for k in critical_keys:
+                total_critical_fields += 1
+                # Clean the value: remove dots, extra spaces, convert to upper
+                val = str(d.get(k, '')).strip().upper()
+                
+                # Broadened Check:
+                # 1. Exact match in list
+                # 2. Substring match (e.g. "PART NOT FOUND" contains "NOT FOUND")
+                is_missing = False
+                if val in missing_indicators:
+                    is_missing = True
+                elif 'NOT FOUND' in val or 'UNKNOWN' in val:
+                    is_missing = True
+                
+                if is_missing:
+                    missing_fields_count += 1
+                else:
+                    filled_critical_fields += 1
+            # ------------------------------------
             
             row = {
                 'NO.': equip_count,
@@ -741,12 +831,12 @@ def preview_data(temp_file):
                 'PMT NO.': os.path.splitext(d['source_drawing'])[0],
                 'EQUIPMENT DESCRIPTION': "",
                 'PARTS': d.get('part_name'),
-                'PHASE': "",
+                'PHASE': d.get('phase', 'Not Found'),
                 'FLUID': d.get('fluid'),
                 'TYPE': d.get('material_type'),
                 'SPEC.': d.get('material_spec'),
                 'GRADE': d.get('material_grade'),
-                'INSULATION': d.get('insulation'),
+                'INSULATION': d.get('insulation', 'Not Found'),
                 'TEMP. (°C) ': d.get('TEMP. (°C) '),
                 'PRESSURE (Mpa) ': d.get('PRESSURE (Mpa) '),
                 'TEMP. (°C)': d.get('TEMP. (°C)'),
@@ -755,7 +845,21 @@ def preview_data(temp_file):
             }
             preview_rows.append(row)
             
-        return render_template('preview.html', data_rows=preview_rows, equipment_count=equip_count, temp_file=temp_file)
+        # --- FINAL CALCULATION ---
+        if total_critical_fields > 0:
+            confidence_score = round((filled_critical_fields / total_critical_fields) * 100, 1)
+        else:
+            confidence_score = 0
+        # -------------------------
+            
+        return render_template(
+            'preview.html', 
+            data_rows=preview_rows, 
+            equipment_count=equip_count, 
+            temp_file=temp_file,
+            confidence_score=confidence_score,
+            missing_fields_count=missing_fields_count
+        )
     except Exception as e:
         flash(f"Error loading preview: {e}", "error")
         return redirect(url_for('index'))
@@ -825,7 +929,6 @@ def save_data():
                 phase=r['PHASE']
             ))
 
-        # Excel Export Logic
         excel_rows = []
         prev_equip_no = None
         for r in rows:
@@ -854,7 +957,6 @@ def save_data():
         with pd.ExcelWriter(filepath, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
             df.to_excel(writer, sheet_name=TARGET_SHEET, startrow=start_row, index=False, header=False)
 
-        # Merge Cells
         wb = load_workbook(filepath)
         ws = wb[TARGET_SHEET]
         cols_to_merge = [1, 2, 3, 4]
@@ -892,7 +994,7 @@ def save_data():
             except: pass
             
         flash('Data saved successfully!', 'success')
-        return render_template('preview.html', data_rows=rows, equipment_count=len(set(get_vals('EQUIPMENT NO. '))), excel_file=filename)
+        return render_template('preview.html', data_rows=rows, equipment_count=len(set(get_vals('EQUIPMENT NO. '))), excel_file=filename, confidence_score=0, missing_fields_count=0)
 
     except Exception as e:
         db.session.rollback()
@@ -939,7 +1041,6 @@ def send_files_email():
     recipient = request.form.get('recipient_email')
     excel_file = request.form.get('excel_filename')
     
-    # Construct paths
     excel_path = os.path.join(app.config['OUTPUT_FOLDER'], excel_file)
     ppt_filename = f"Inspection_Plan_{excel_file.replace('.xlsx', '.pptx')}"
     ppt_path = os.path.join(app.config['OUTPUT_FOLDER'], ppt_filename)
@@ -948,24 +1049,20 @@ def send_files_email():
         flash("Please enter an email address.", "error")
         return redirect(url_for('index'))
 
-    # --- CRITICAL FIX: GENERATE PPT IF MISSING ---
     if not os.path.exists(ppt_path):
         print("PPT missing, generating now...")
         generated_path = generate_ppt_internal(excel_file)
         if not generated_path:
             flash("Warning: Could not generate PowerPoint attachment.", "error")
-    # ---------------------------------------------
 
     try:
         msg = Message("Generated Inspection Files", recipients=[recipient])
         msg.body = f"Hello,\n\nPlease find attached the generated Inspection Plan and Excel Data for {excel_file}.\n\nSent from iPetro System."
 
-        # Attach Excel
         if os.path.exists(excel_path):
             with app.open_resource(excel_path) as fp:
                 msg.attach(excel_file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fp.read())
         
-        # Attach PowerPoint
         if os.path.exists(ppt_path):
             with app.open_resource(ppt_path) as fp:
                 msg.attach(ppt_filename, "application/vnd.openxmlformats-officedocument.presentationml.presentation", fp.read())
@@ -1019,13 +1116,63 @@ def manager_history():
 @login_required
 @manager_required
 def manager_reports():
-    return render_template('manager_placeholder.html', title='Detailed Data Reports')
+    # --- CHANGED: Count distinct source drawings instead of equipment numbers ---
+    total_files = db.session.query(func.count(func.distinct(EquipmentData.source_drawing))).scalar() or 0
+
+    total_components = EquipmentData.query.count() or 0
+    
+    bad_data_count = EquipmentData.query.filter(
+        (EquipmentData.material_type.ilike('%Not Found%')) | 
+        (EquipmentData.material_spec.ilike('%Not Found%'))
+    ).count()
+    
+    success_rate = 0
+    if total_components > 0:
+        success_rate = round(((total_components - bad_data_count) / total_components) * 100, 1)
+
+    material_stats = db.session.query(
+        EquipmentData.material_type, 
+        func.count(EquipmentData.id)
+    ).group_by(EquipmentData.material_type).all()
+    
+    mat_labels = []
+    mat_counts = []
+    for m in material_stats:
+        label = m[0] if m[0] and m[0].strip() != '' else 'Unknown'
+        mat_labels.append(label)
+        mat_counts.append(m[1])
+
+    action_items = EquipmentData.query.filter(
+        (EquipmentData.material_type.ilike('%Not Found%')) | 
+        (EquipmentData.material_spec.ilike('%Not Found%'))
+    ).limit(50).all()
+
+    fluids = [r[0] for r in db.session.query(EquipmentData.fluid).distinct().all() if r[0]]
+
+    equipment_list = db.session.query(
+        EquipmentData.equipment_no,
+        func.max(EquipmentData.equipment_description).label('description'),
+        func.max(EquipmentData.pmt_no).label('pmt')
+    ).filter(EquipmentData.equipment_no != '').group_by(EquipmentData.equipment_no).all()
+
+    return render_template(
+        'report.html',
+        total_files=total_files,
+        total_components=total_components,
+        success_rate=success_rate,
+        mat_labels=json.dumps(mat_labels),
+        mat_counts=json.dumps(mat_counts),
+        action_items=action_items,
+        fluids=fluids,
+        equipment_list=equipment_list,
+        current_date=datetime.now().strftime("%d %B %Y")
+    )
 
 @app.route('/manager/review')
 @login_required
 @manager_required
 def manager_review_queue():
-    return render_template('manager_placeholder.html', title='Final Review Queue')
+    return render_template('queue.html')
 
 # ==================== ADMIN ROUTES ==================
 
@@ -1088,15 +1235,63 @@ def admin_history():
 @login_required
 @admin_required
 def admin_reports():
-    flash("The Reports module is currently under construction.", "info")
-    return redirect(url_for('admin_dashboard'))
+    # --- CHANGED: Count distinct source drawings instead of equipment numbers ---
+    total_files = db.session.query(func.count(func.distinct(EquipmentData.source_drawing))).scalar() or 0
+    
+    total_components = EquipmentData.query.count() or 0
+    
+    bad_data_count = EquipmentData.query.filter(
+        (EquipmentData.material_type.ilike('%Not Found%')) | 
+        (EquipmentData.material_spec.ilike('%Not Found%'))
+    ).count()
+    
+    success_rate = 0
+    if total_components > 0:
+        success_rate = round(((total_components - bad_data_count) / total_components) * 100, 1)
+
+    material_stats = db.session.query(
+        EquipmentData.material_type, 
+        func.count(EquipmentData.id)
+    ).group_by(EquipmentData.material_type).all()
+    
+    mat_labels = []
+    mat_counts = []
+    for m in material_stats:
+        label = m[0] if m[0] and m[0].strip() != '' else 'Unknown'
+        mat_labels.append(label)
+        mat_counts.append(m[1])
+
+    action_items = EquipmentData.query.filter(
+        (EquipmentData.material_type.ilike('%Not Found%')) | 
+        (EquipmentData.material_spec.ilike('%Not Found%'))
+    ).limit(50).all()
+
+    fluids = [r[0] for r in db.session.query(EquipmentData.fluid).distinct().all() if r[0]]
+
+    equipment_list = db.session.query(
+        EquipmentData.equipment_no,
+        func.max(EquipmentData.equipment_description).label('description'),
+        func.max(EquipmentData.pmt_no).label('pmt')
+    ).filter(EquipmentData.equipment_no != '').group_by(EquipmentData.equipment_no).all()
+
+    return render_template(
+        'report.html',
+        total_files=total_files,
+        total_components=total_components,
+        success_rate=success_rate,
+        mat_labels=json.dumps(mat_labels),
+        mat_counts=json.dumps(mat_counts),
+        action_items=action_items,
+        fluids=fluids,
+        equipment_list=equipment_list,
+        current_date=datetime.now().strftime("%d %B %Y")
+    )
 
 @app.route('/admin/review-queue')
 @login_required
 @admin_required
 def admin_review_queue():
-    flash("The Review Queue module is currently under construction.", "info")
-    return redirect(url_for('admin_dashboard'))
+    return render_template('queue.html')
 
 @app.route('/admin/statistics')
 @login_required

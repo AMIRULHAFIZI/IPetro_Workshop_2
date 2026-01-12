@@ -18,10 +18,82 @@
         min-height: 60px;
         background-color: #fff;
     }
+    /* Highlight class for missing fields */
+    .missing-highlight {
+        border-color: #ef4444 !important; /* red-500 */
+        background-color: #fef2f2 !important; /* red-50 */
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2) !important;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
+
+<!-- --- STATISTICS SECTION (IDs added for JS) --- -->
+<div class="max-w-[95%] mx-auto pb-8 pt-2">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        
+        <!-- Confidence Score Card -->
+        <div id="confidence-card" class="bg-white rounded-lg shadow-md p-6 border-l-4 {% if confidence_score > 80 %}border-green-500{% elif confidence_score > 50 %}border-yellow-500{% else %}border-red-500{% endif %} flex flex-col justify-between transition-colors duration-300">
+            <div class="flex items-center justify-between w-full">
+                <div>
+                    <p class="text-sm font-medium text-gray-500 uppercase tracking-wider">AI Confidence Level</p>
+                    <h2 id="confidence-display" class="text-3xl font-bold text-gray-800 mt-1">{{ confidence_score }}%</h2>
+                    <p class="text-xs text-gray-400 mt-1">Based on data density extraction</p>
+                </div>
+                <div id="confidence-icon" class="h-12 w-12 rounded-full flex items-center justify-center transition-colors duration-300
+                    {% if confidence_score > 80 %}bg-green-100 text-green-600{% elif confidence_score > 50 %}bg-yellow-100 text-yellow-600{% else %}bg-red-100 text-red-600{% endif %}">
+                    <i data-lucide="activity" class="w-6 h-6"></i>
+                </div>
+            </div>
+            
+            <!-- Legend for Confidence Levels -->
+            <div class="mt-4 pt-3 border-t border-gray-100 flex justify-between text-xs text-gray-500">
+                <div class="flex items-center" title="Good">
+                    <span class="w-2.5 h-2.5 rounded-full bg-green-500 mr-1.5"></span> High (>80%)
+                </div>
+                <div class="flex items-center" title="Needs Review">
+                    <span class="w-2.5 h-2.5 rounded-full bg-yellow-500 mr-1.5"></span> Medium (50-80%)
+                </div>
+                <div class="flex items-center" title="Poor">
+                    <span class="w-2.5 h-2.5 rounded-full bg-red-500 mr-1.5"></span> Low (&lt;50%)
+                </div>
+            </div>
+        </div>
+
+        <!-- Missing Data Card -->
+        <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-blue-500 flex flex-col justify-between">
+            <div class="flex items-center justify-between w-full">
+                <div>
+                    <p class="text-sm font-medium text-gray-500 uppercase tracking-wider">Unfound Data Points</p>
+                    <h2 id="missing-count-display" class="text-3xl font-bold text-gray-800 mt-1">{{ missing_fields_count }}</h2>
+                    <p class="text-xs text-gray-400 mt-1">Fields marked 'Not Found'</p>
+                </div>
+                <div class="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                    <i data-lucide="alert-circle" class="w-6 h-6"></i>
+                </div>
+            </div>
+            
+            <!-- Highlight Button -->
+            <button onclick="highlightMissing()" class="mt-3 w-full py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold uppercase tracking-wide rounded transition-colors flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <i data-lucide="eye" class="w-3 h-3 mr-2"></i> Highlight Missing
+            </button>
+        </div>
+
+        <!-- Equipment Count Card -->
+        <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-purple-500 flex items-center justify-between">
+            <div>
+                <p class="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Equipment</p>
+                <h2 class="text-3xl font-bold text-gray-800 mt-1">{{ equipment_count }}</h2>
+                <p class="text-xs text-gray-400 mt-1">Distinct tags identified</p>
+            </div>
+            <div class="h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
+                <i data-lucide="layers" class="w-6 h-6"></i>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ----------------------------- -->
 
 <datalist id="equipment_desc_options">
     <option value="Air Receiver">
@@ -50,7 +122,6 @@
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 animate-fade-in-down" style="animation-delay: 0.1s;">
-        
         <div class="md:col-span-2 bg-white border border-gray-200 rounded-lg shadow-md p-6 h-full">
             <div class="flex items-center mb-4 border-b border-gray-100 pb-2">
                 <div class="bg-blue-100 p-2 rounded-full mr-3">
@@ -58,10 +129,8 @@
                 </div>
                 <h3 class="text-lg font-bold text-gray-800">Send via Email</h3>
             </div>
-            
             <form action="{{ url_for('send_files_email') }}" method="POST">
                 <input type="hidden" name="excel_filename" value="{{ excel_file }}">
-                
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Recipient Email</label>
                     <input type="email" name="recipient_email" 
@@ -72,7 +141,6 @@
                         The system will automatically attach the Excel and PowerPoint files.
                     </p>
                 </div>
-                
                 <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors flex justify-center items-center">
                     <i data-lucide="send" class="w-4 h-4 mr-2"></i> Send Email
                 </button>
@@ -193,17 +261,17 @@
                                 <div class="flex flex-col h-full space-y-1">
                                     <select onchange="updateTextarea(this, '{{ parent_loop.index0 }}')" 
                                             class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-gray-600 bg-gray-50">
-                                        <option value="" disabled selected>▼ Quick Select...</option>
-                                        <option value="Air Receiver">Air Receiver</option>
-                                        <option value="Expansion Tank">Expansion Tank</option>
-                                        <option value="Condensate Vessel">Condensate Vessel</option>
-                                        <option value="Hot Water System">Hot Water System</option>
-                                        <option value="Absorber for Neutralization of Acid Gases">Absorber for Neutralization of Acid Gases</option>
-                                        <option value="Thermal Deaerator">Thermal Deaerator</option>
-                                        <option value="Cooling of Steam- Gas Mix at The Exit of the Reactor">Cooling of Steam- Gas Mix...</option>
-                                        <option value="Gas Scrubber Cooler">Gas Scrubber Cooler</option>
-                                        <option value="Cooling of Water on Irrigation of An Absorber">Cooling of Water on Irrigation...</option>
-                                        <option value="Reflux Condensor of Drying Tower">Reflux Condensor of Drying Tower</option>
+                                            <option value="" disabled selected>▼ Quick Select...</option>
+                                            <option value="Air Receiver">Air Receiver</option>
+                                            <option value="Expansion Tank">Expansion Tank</option>
+                                            <option value="Condensate Vessel">Condensate Vessel</option>
+                                            <option value="Hot Water System">Hot Water System</option>
+                                            <option value="Absorber for Neutralization of Acid Gases">Absorber for Neutralization of Acid Gases</option>
+                                            <option value="Thermal Deaerator">Thermal Deaerator</option>
+                                            <option value="Cooling of Steam- Gas Mix at The Exit of the Reactor">Cooling of Steam- Gas Mix...</option>
+                                            <option value="Gas Scrubber Cooler">Gas Scrubber Cooler</option>
+                                            <option value="Cooling of Water on Irrigation of An Absorber">Cooling of Water on Irrigation...</option>
+                                            <option value="Reflux Condensor of Drying Tower">Reflux Condensor of Drying Tower</option>
                                     </select>
                                     <textarea name="EQUIPMENT DESCRIPTION" 
                                               id="desc-textarea-{{ parent_loop.index0 }}"
@@ -216,35 +284,42 @@
                             
                             <td class="px-2 py-2">
                                 <div class="flex shadow-sm rounded-md h-8">
+                                    <!-- Add critical-field class here -->
                                     <input type="text" name="PARTS" value="{{ row['PARTS'] }}" 
-                                           class="flex-1 w-full text-xs border-gray-300 rounded-l-md focus:ring-blue-500 focus:border-blue-500 font-medium z-10" 
+                                           class="critical-field flex-1 w-full text-xs border-gray-300 rounded-l-md focus:ring-blue-500 focus:border-blue-500 font-medium z-10" 
                                            placeholder="Type...">
                                    
-                                    <select onchange="this.previousElementSibling.value = this.value; this.selectedIndex = 0;"
+                                    <select onchange="this.previousElementSibling.value = this.value; this.previousElementSibling.dispatchEvent(new Event('input')); this.selectedIndex = 0;"
                                             class="w-8 text-xs border-l-0 border-gray-300 bg-gray-100 rounded-r-md focus:ring-blue-500 focus:border-blue-500 p-0 text-center text-gray-600 cursor-pointer hover:bg-gray-200">
-                                        <option value="" disabled selected>▼</option>
-                                        <option value="Top Head">Top Head</option>
-                                        <option value="Shell">Shell</option>
-                                        <option value="Bottom Head">Bottom Head</option>
-                                        <option value="Head">Head</option>
-                                        <option value="Top Channel">Top Channel</option>
-                                        <option value="Bottom Channel">Bottom Channel</option>
-                                        <option value="Channel">Channel</option>
+                                            <option value="" disabled selected>▼</option>
+                                            <option value="Top Head">Top Head</option>
+                                            <option value="Shell">Shell</option>
+                                            <option value="Bottom Head">Bottom Head</option>
+                                            <option value="Head">Head</option>
+                                            <option value="Top Channel">Top Channel</option>
+                                            <option value="Bottom Channel">Bottom Channel</option>
+                                            <option value="Channel">Channel</option>
                                     </select>
                                 </div>
                             </td>
                             
-                            <td class="px-2 py-2"><input type="text" name="PHASE" value="{{ row['PHASE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
-                            <td class="px-2 py-2"><input type="text" name="FLUID" value="{{ row['FLUID'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            <td class="px-2 py-2"><input type="text" name="PHASE" value="{{ row['PHASE'] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <!-- Add critical-field class here -->
+                            <td class="px-2 py-2"><input type="text" name="FLUID" value="{{ row['FLUID'] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
                             
-                            <td class="px-2 py-2 border-l"><input type="text" name="TYPE" value="{{ row['TYPE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
-                            <td class="px-2 py-2"><input type="text" name="SPEC." value="{{ row['SPEC.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
-                            <td class="px-2 py-2 border-r"><input type="text" name="GRADE" value="{{ row['GRADE'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <!-- Add critical-field class here -->
+                            <td class="px-2 py-2 border-l"><input type="text" name="TYPE" value="{{ row['TYPE'] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <!-- Add critical-field class here -->
+                            <td class="px-2 py-2"><input type="text" name="SPEC." value="{{ row['SPEC.'] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
+                            <!-- Add critical-field class here -->
+                            <td class="px-2 py-2 border-r"><input type="text" name="GRADE" value="{{ row['GRADE'] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"></td>
                             
-                            <td class="px-2 py-2"><input type="text" name="INSULATION" value="{{ row['INSULATION'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            <td class="px-2 py-2"><input type="text" name="INSULATION" value="{{ row['INSULATION'] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
                             
-                            <td class="px-2 py-2 border-l bg-blue-50/30"><input type="text" name="TEMP. (°C) " value="{{ row['TEMP. (°C) '] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
-                            <td class="px-2 py-2 border-r bg-blue-50/30"><input type="text" name="PRESSURE (Mpa) " value="{{ row['PRESSURE (Mpa) '] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            <!-- Add critical-field class here -->
+                            <td class="px-2 py-2 border-l bg-blue-50/30"><input type="text" name="TEMP. (°C) " value="{{ row['TEMP. (°C) '] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+                            <!-- Add critical-field class here -->
+                            <td class="px-2 py-2 border-r bg-blue-50/30"><input type="text" name="PRESSURE (Mpa) " value="{{ row['PRESSURE (Mpa) '] }}" class="critical-field w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
                             
                             <td class="px-2 py-2 border-l bg-green-50/30"><input type="text" name="TEMP. (°C)" value="{{ row['TEMP. (°C)'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
                             <td class="px-2 py-2 bg-green-50/30"><input type="text" name="PRESSURE (Mpa)" value="{{ row['PRESSURE (Mpa)'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
@@ -276,6 +351,100 @@
 <script>
     let currentIndex = 0;
     const totalDrawings = parseInt(document.getElementById('total-drawings').value);
+
+    // Live Stats Calculation Function
+    function calculateStats() {
+        const inputs = document.querySelectorAll('.critical-field');
+        const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
+        
+        let total = 0;
+        let missing = 0;
+
+        inputs.forEach(input => {
+            total++;
+            const val = input.value.trim().toUpperCase();
+            
+            let isMissing = false;
+            if (missingIndicators.includes(val)) isMissing = true;
+            else if (val.includes('NOT FOUND') || val.includes('UNKNOWN')) isMissing = true;
+            
+            if (isMissing) missing++;
+        });
+
+        const score = total > 0 ? Math.round(((total - missing) / total) * 100) : 0;
+        
+        // Update DOM
+        document.getElementById('missing-count-display').innerText = missing;
+        document.getElementById('confidence-display').innerText = score + '%';
+        
+        // Update Colors dynamically
+        const card = document.getElementById('confidence-card');
+        const icon = document.getElementById('confidence-icon');
+        
+        // Reset classes
+        card.className = "bg-white rounded-lg shadow-md p-6 border-l-4 flex flex-col justify-between transition-colors duration-300";
+        icon.className = "h-12 w-12 rounded-full flex items-center justify-center transition-colors duration-300";
+
+        if (score > 80) {
+            card.classList.add('border-green-500');
+            icon.classList.add('bg-green-100', 'text-green-600');
+        } else if (score > 50) {
+            card.classList.add('border-yellow-500');
+            icon.classList.add('bg-yellow-100', 'text-yellow-600');
+        } else {
+            card.classList.add('border-red-500');
+            icon.classList.add('bg-red-100', 'text-red-600');
+        }
+    }
+
+    // Function to Highlight Missing Data
+    function highlightMissing() {
+        const inputs = document.querySelectorAll('.critical-field');
+        const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
+        let firstMissing = null;
+
+        inputs.forEach(input => {
+            const val = input.value.trim().toUpperCase();
+            let isMissing = false;
+            if (missingIndicators.includes(val)) isMissing = true;
+            else if (val.includes('NOT FOUND') || val.includes('UNKNOWN')) isMissing = true;
+
+            if (isMissing) {
+                // Apply Highlight
+                input.classList.add('missing-highlight');
+                
+                // Add one-time listener to remove highlight when user edits
+                input.addEventListener('input', function() {
+                    this.classList.remove('missing-highlight');
+                }, { once: true });
+                
+                if (!firstMissing) firstMissing = input;
+            } else {
+                input.classList.remove('missing-highlight');
+            }
+        });
+
+        // Scroll to first missing item
+        if (firstMissing) {
+            // Check if the missing item is on a different drawing page
+            let parentSection = firstMissing.closest('.drawing-section');
+            if (parentSection) {
+                let id = parentSection.id; 
+                let index = parseInt(id.split('-')[1]);
+                
+                // Switch view if needed
+                if (index !== currentIndex) {
+                    currentIndex = index;
+                    updateView();
+                }
+            }
+            // Scroll with animation
+            setTimeout(() => {
+                firstMissing.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                firstMissing.focus();
+            }, 100);
+        }
+    }
 
     // Sync merged description
     function syncDescription(masterInput, drawingIndex) {
@@ -319,6 +488,13 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         updateView();
+        // Add event listeners for live stats
+        const inputs = document.querySelectorAll('.critical-field');
+        inputs.forEach(input => {
+            input.addEventListener('input', calculateStats);
+        });
+        // Initial calc (though server does it too, this ensures sync)
+        calculateStats();
     });
 </script>
 {% endblock %}
