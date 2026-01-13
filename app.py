@@ -173,9 +173,8 @@ def duplicate_slide(pres, index):
 
 def generate_ppt_internal(filename):
     """
-    Internal function to generate the PPT file with:
-    1. Data Slide(s) (Table with Text Overlays)
-    2. ONE Final Drawing Slide (Cropped to show only the drawing on the LEFT)
+    Internal function to generate the PPT file with interleaved slides:
+    [Data Slides A] -> [Drawing A] -> [Data Slides B] -> [Drawing B]
     """
     # 1. Path Setup
     excel_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
@@ -243,7 +242,7 @@ def generate_ppt_internal(filename):
         if idx_part is None: idx_part = 4
         if idx_fluid is None: idx_fluid = 6
 
-        # 4. FIX: FORWARD FILL METADATA
+        # 4. FIX: FORWARD FILL METADATA (Crucial for Grouping)
         cols_to_fill = []
         if idx_equip_no is not None: cols_to_fill.append(idx_equip_no)
         if idx_pmt_no is not None: cols_to_fill.append(idx_pmt_no)
@@ -274,140 +273,148 @@ def generate_ppt_internal(filename):
     try:
         prs = Presentation(template_path)
         MAX_ROWS = 5
-        data_rows = [row for _, row in df_data.iterrows()]
-        chunks = [data_rows[i:i + MAX_ROWS] for i in range(0, len(data_rows), MAX_ROWS)] if data_rows else [[]]
+        
+        # --- NEW STRATEGY: GROUP BY PMT NO (FILE) ---
+        # This ensures we process [Data -> Drawing] for File A, then [Data -> Drawing] for File B
+        if idx_pmt_no is not None:
+            # Get the column name to group by
+            pmt_col = df_data.columns[idx_pmt_no]
+            # Group by PMT No, keeping the order (sort=False)
+            grouped = df_data.groupby(pmt_col, sort=False)
+        else:
+            # Fallback if PMT column fails: treat everything as one group
+            grouped = [("Unknown", df_data)]
 
-        # GLOBAL VARIABLES FOR DRAWING
-        final_drawing_filename = ""
-
-        # --- PART 1: GENERATE DATA SLIDES ---
-        for i, chunk in enumerate(chunks):
-            if i == 0: slide = prs.slides[0]
-            else: slide = duplicate_slide(prs, 0)
+        for pmt_val, group_df in grouped:
             
-            first_row = chunk[0] if chunk else None
-            current_tag = ""
-            current_pmt = ""
-            current_desc = ""
-
-            if first_row is not None:
-                if idx_equip_no is not None: current_tag = str(first_row.get(idx_equip_no, '')).strip()
-                if idx_pmt_no is not None: 
-                    current_pmt = str(first_row.get(idx_pmt_no, '')).strip()
-                    # SAVE FILENAME FOR LATER
-                    if not final_drawing_filename and current_pmt and current_pmt != '-':
-                        final_drawing_filename = current_pmt + ".pdf"
-                        
-                if idx_desc is not None: current_desc = str(first_row.get(idx_desc, '')).strip()
-
-            # Text Overlays
-            txBox_desc = slide.shapes.add_textbox(Inches(3.3), Inches(0.55), Inches(3.5), Inches(0.4))
-            tf_desc = txBox_desc.text_frame
-            tf_desc.text = current_desc
-            tf_desc.paragraphs[0].font.size = Pt(8)
-            tf_desc.paragraphs[0].font.name = 'Arial'
-            tf_desc.paragraphs[0].font.bold = True
-
-            txBox_tag = slide.shapes.add_textbox(Inches(6.3), Inches(0.55), Inches(1.8), Inches(0.4))
-            tf_tag = txBox_tag.text_frame
-            tf_tag.text = current_tag
-            tf_tag.paragraphs[0].font.size = Pt(8) 
-            tf_tag.paragraphs[0].font.name = 'Arial'
-            tf_tag.paragraphs[0].font.bold = True
-
-            txBox_pmt = slide.shapes.add_textbox(Inches(7.9), Inches(0.55), Inches(1.8), Inches(0.4))
-            tf_pmt = txBox_pmt.text_frame
-            tf_pmt.text = current_pmt
-            tf_pmt.paragraphs[0].font.size = Pt(6)
-            tf_pmt.paragraphs[0].font.name = 'Arial'
-            tf_pmt.paragraphs[0].font.bold = True
-
-            # Fill Table
-            main_table = None
-            for shape in slide.shapes:
-                if shape.has_table:
-                    try:
-                        r0 = " ".join([c.text_frame.text.upper() for c in shape.table.rows[0].cells])
-                        if "COMPONENT" in r0 and "FLUID" in r0:
-                            main_table = shape.table
-                            break
-                    except: continue
+            # --- 1. GENERATE DATA SLIDES FOR THIS GROUP ---
+            data_rows = [row for _, row in group_df.iterrows()]
+            chunks = [data_rows[i:i + MAX_ROWS] for i in range(0, len(data_rows), MAX_ROWS)] if data_rows else [[]]
             
-            if main_table:
-                start_row = 2
-                while len(main_table.rows) < (start_row + MAX_ROWS):
-                    add_new_row(main_table)
+            # Capture metadata from the first row of this group
+            first_row = data_rows[0]
+            current_tag = str(first_row.get(idx_equip_no, '')).strip()
+            current_pmt = str(first_row.get(idx_pmt_no, '')).strip()
+            current_desc = str(first_row.get(idx_desc, '')).strip()
+            
+            # Determine Drawing Filename
+            current_drawing_filename = ""
+            if current_pmt and current_pmt != '-':
+                current_drawing_filename = current_pmt + ".pdf"
+
+            for chunk in chunks:
+                # Copy Master Slide (Index 0)
+                slide = duplicate_slide(prs, 0)
                 
-                for idx_in_chunk, row_data in enumerate(chunk):
-                    curr_idx = start_row + idx_in_chunk
-                    cells = main_table.rows[curr_idx].cells
-                    val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
-                    _set_cell_text(cells[0], val_fluid, 9)
-                    val_part = row_data.get(idx_part, '') if idx_part is not None else ''
-                    _set_cell_text(cells[1], val_part, 9)
-                    _set_cell_text(cells[2], "", 9) 
-                    _set_cell_text(cells[3], row_data.get(idx_type, ''), 9)
-                    _set_cell_text(cells[4], row_data.get(idx_spec, ''), 9)
-                    _set_cell_text(cells[5], row_data.get(idx_grade, ''), 9)
-                    val_ins = row_data.get(idx_insul, '') if idx_insul is not None else ''
-                    _set_cell_text(cells[6], val_ins, 9)
-                    val_temp = row_data.get(idx_temp, '') if idx_temp is not None else ''
-                    _set_cell_text(cells[7], val_temp, 9)
-                    val_press = row_data.get(idx_press, '') if idx_press is not None else ''
-                    _set_cell_text(cells[8], val_press, 9)
+                # Overlay Text Boxes
+                txBox_desc = slide.shapes.add_textbox(Inches(2.6), Inches(0.55), Inches(3.5), Inches(0.4))
+                tf_desc = txBox_desc.text_frame
+                tf_desc.text = current_desc
+                tf_desc.paragraphs[0].font.size = Pt(10)
+                tf_desc.paragraphs[0].font.name = 'Arial'
+                tf_desc.paragraphs[0].font.bold = True
 
-                for j in range(len(chunk), MAX_ROWS):
-                    curr_idx = start_row + j
-                    if curr_idx < len(main_table.rows):
-                        for cell in main_table.rows[curr_idx].cells:
-                            _set_cell_text(cell, "", 9)
+                txBox_tag = slide.shapes.add_textbox(Inches(6.3), Inches(0.55), Inches(1.8), Inches(0.4))
+                tf_tag = txBox_tag.text_frame
+                tf_tag.text = current_tag
+                tf_tag.paragraphs[0].font.size = Pt(11) 
+                tf_tag.paragraphs[0].font.name = 'Arial'
+                tf_tag.paragraphs[0].font.bold = True
 
-        # --- PART 2: GENERATE ONE DRAWING SLIDE (AT THE END) ---
-        if final_drawing_filename:
-            pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], final_drawing_filename)
-            
-            if os.path.exists(pdf_path):
-                try:
-                    try: blank_slide_layout = prs.slide_layouts[6] 
-                    except: blank_slide_layout = prs.slide_layouts[0] 
-                        
-                    slide_drawing = prs.slides.add_slide(blank_slide_layout)
+                txBox_pmt = slide.shapes.add_textbox(Inches(9.5), Inches(0.55), Inches(1.8), Inches(0.4))
+                tf_pmt = txBox_pmt.text_frame
+                tf_pmt.text = current_pmt
+                tf_pmt.paragraphs[0].font.size = Pt(10)
+                tf_pmt.paragraphs[0].font.name = 'Arial'
+                tf_pmt.paragraphs[0].font.bold = True
+
+                # Fill Table
+                main_table = None
+                for shape in slide.shapes:
+                    if shape.has_table:
+                        try:
+                            r0 = " ".join([c.text_frame.text.upper() for c in shape.table.rows[0].cells])
+                            if "COMPONENT" in r0 and "FLUID" in r0:
+                                main_table = shape.table
+                                break
+                        except: continue
+                
+                if main_table:
+                    start_row = 2
+                    while len(main_table.rows) < (start_row + MAX_ROWS):
+                        add_new_row(main_table)
                     
-                    poppler_p = app.config.get('POPPLER_PATH') or os.environ.get('POPPLER_PATH')
-                    # Convert only the FIRST page of PDF
-                    images = pdf2image.convert_from_path(pdf_path, first_page=1, last_page=1, dpi=200, poppler_path=poppler_p)
-                    
-                    if images:
-                        img = images[0]
-                        width, height = img.size
-                        
-                        # === UPDATED CROP: KEEP LEFT 80% ===
-                        # This targets the main drawing and removes the right-side columns
-                        
-                        left_crop = width * 0.02   # Start from almost the left edge
-                        top_crop = height * 0.02   # Start from almost the top
-                        right_crop = width * 0.82  # Keep 82% of width (cuts off right tables)
-                        bottom_crop = height * 0.98 # Go down to bottom
-                        
-                        img_cropped = img.crop((left_crop, top_crop, right_crop, bottom_crop))
-                        
-                        # Save temp image
-                        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_img:
-                            img_cropped.save(tmp_img.name, 'JPEG')
-                            tmp_img_path = tmp_img.name
-                        
-                        # Insert Full Height on Slide
-                        ppt_left = Inches(0.5)
-                        ppt_top = Inches(0.5)
-                        ppt_height = Inches(6.5) 
-                        
-                        slide_drawing.shapes.add_picture(tmp_img_path, ppt_left, ppt_top, height=ppt_height)
-                        
-                        try: os.remove(tmp_img_path)
-                        except: pass
+                    for idx_in_chunk, row_data in enumerate(chunk):
+                        curr_idx = start_row + idx_in_chunk
+                        cells = main_table.rows[curr_idx].cells
+                        val_fluid = row_data.get(idx_fluid, '') if idx_fluid is not None else ''
+                        _set_cell_text(cells[0], val_fluid, 9)
+                        val_part = row_data.get(idx_part, '') if idx_part is not None else ''
+                        _set_cell_text(cells[1], val_part, 9)
+                        _set_cell_text(cells[2], "", 9) 
+                        _set_cell_text(cells[3], row_data.get(idx_type, ''), 9)
+                        _set_cell_text(cells[4], row_data.get(idx_spec, ''), 9)
+                        _set_cell_text(cells[5], row_data.get(idx_grade, ''), 9)
+                        val_ins = row_data.get(idx_insul, '') if idx_insul is not None else ''
+                        _set_cell_text(cells[6], val_ins, 9)
+                        val_temp = row_data.get(idx_temp, '') if idx_temp is not None else ''
+                        _set_cell_text(cells[7], val_temp, 9)
+                        val_press = row_data.get(idx_press, '') if idx_press is not None else ''
+                        _set_cell_text(cells[8], val_press, 9)
 
-                except Exception as e:
-                    print(f"Error adding drawing slide: {e}")
+                    for j in range(len(chunk), MAX_ROWS):
+                        curr_idx = start_row + j
+                        if curr_idx < len(main_table.rows):
+                            for cell in main_table.rows[curr_idx].cells:
+                                _set_cell_text(cell, "", 9)
+
+            # --- 2. GENERATE DRAWING SLIDE FOR THIS GROUP ---
+            # This happens immediately after the data slides for this specific file
+            if current_drawing_filename:
+                pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], current_drawing_filename)
+                
+                if os.path.exists(pdf_path):
+                    try:
+                        try: blank_slide_layout = prs.slide_layouts[6] 
+                        except: blank_slide_layout = prs.slide_layouts[0] 
+                            
+                        slide_drawing = prs.slides.add_slide(blank_slide_layout)
+                        
+                        poppler_p = app.config.get('POPPLER_PATH') or os.environ.get('POPPLER_PATH')
+                        images = pdf2image.convert_from_path(pdf_path, first_page=1, last_page=1, dpi=200, poppler_path=poppler_p)
+                        
+                        if images:
+                            img = images[0]
+                            width, height = img.size
+                            
+                            # === CROP LEFT 80% ===
+                            left_crop = width * 0.02
+                            top_crop = height * 0.02
+                            right_crop = width * 0.82
+                            bottom_crop = height * 0.98
+                            
+                            img_cropped = img.crop((left_crop, top_crop, right_crop, bottom_crop))
+                            
+                            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_img:
+                                img_cropped.save(tmp_img.name, 'JPEG')
+                                tmp_img_path = tmp_img.name
+                            
+                            ppt_left = Inches(0.5)
+                            ppt_top = Inches(0.5)
+                            ppt_height = Inches(6.5) 
+                            
+                            slide_drawing.shapes.add_picture(tmp_img_path, ppt_left, ppt_top, height=ppt_height)
+                            
+                            try: os.remove(tmp_img_path)
+                            except: pass
+
+                    except Exception as e:
+                        print(f"Error adding drawing slide: {e}")
+
+        # --- PART 3: CLEANUP TEMPLATE ---
+        xml_slides = prs.slides._sldIdLst
+        slides = list(xml_slides)
+        xml_slides.remove(slides[0])
 
         prs.save(output_pptx_path)
         return output_pptx_path
@@ -562,43 +569,32 @@ def load_user(user_id):
 
 def get_gemini_prompt():
     return """
-    You are an expert engineering assistant specializing in technical drawing analysis. 
-    Analyze the provided technical drawing images with high precision.
-    
-    Your task is to extract the following technical data points. 
-    Look specifically for "Design Data" tables, "Bill of Materials", "Nozzle Schedules", or general notes.
-    
-    Required Fields:
-    1. design_pressure: Look for "Design Pressure", "Des Press", "P-Design". Return with units (e.g., "14 Bar").
-    2. design_temperature: Look for "Design Temperature", "Des Temp", "T-Design". Return with units (e.g., "100 C").
-    3. operating_pressure: Look for "Operating Pressure", "Op Press", "Working Pressure". Return with units.
-    4. operating_temperature: Look for "Operating Temperature", "Op Temp". Return with units.
-    5. fluid: Look for "Fluid", "Medium", "Contents", "Service".
-    6. insulation: Look for "Insulation", "Insul", "Lagging". Return "Yes"/"No" or thickness/type if found.
-    7. phase: Look for "Phase" (e.g., "Liquid", "Gas", "Vapor").
-    
-    8. parts_list: Extract a list of MAJOR pressure-retaining components (Shell, Head, Channel, Tube Sheet, Pipe). 
-       - For each part, find its "Material Specification" (e.g., SA-516, SA-106) and "Grade" (e.g., 70, B).
-       - Ignore nuts, bolts, gaskets, and minor supports unless major.
-       
-    Output Format:
-    Return ONLY valid JSON. Do not include markdown formatting like ```json ... ```.
-    
-    JSON Schema:
+    You are a precise data extraction engine. Your task is to extract technical data and the full Bill of Materials (BOM) from the provided engineering drawing.
+
+    1. GENERAL DATA:
+       - Extract: Design Pressure, Design Temperature, Operating Pressure, Operating Temperature, Fluid, Insulation (Yes/No), Phase (Liquid/Gas).
+
+    2. BILL OF MATERIALS (CRITICAL):
+       - Locate the "Bill of Materials", "List of Materials", or "Nozzle Schedule" table.
+       - Extract EVERY SINGLE ROW from this table exactly as written.
+       - DO NOT FILTER OR SUMMARIZE. If the table has 20 rows, return 20 items.
+       - For each row, map the columns to:
+         - "part_name" (Description, Component, or Item Name)
+         - "material_spec" (Material Specification, e.g., SA-516, SA-106)
+         - "material_grade" (Grade, e.g., 70, B, 316L)
+
+    Output strictly valid JSON matching this schema:
     {
-      "design_pressure": "Value or 'Not Found'",
-      "design_temperature": "Value or 'Not Found'",
-      "operating_pressure": "Value or 'Not Found'",
-      "operating_temperature": "Value or 'Not Found'",
-      "fluid": "Value or 'Not Found'",
-      "insulation": "Value or 'Not Found'",
-      "phase": "Value or 'Not Found'",
+      "design_pressure": "Value",
+      "design_temperature": "Value",
+      "operating_pressure": "Value",
+      "operating_temperature": "Value",
+      "fluid": "Value",
+      "insulation": "Value",
+      "phase": "Value",
       "parts_list": [
-        {
-          "part_name": "Name of part",
-          "material_spec": "Spec string",
-          "material_grade": "Grade string"
-        }
+        { "part_name": "Shell", "material_spec": "SA-516", "material_grade": "70" },
+        { "part_name": "Hex Nut", "material_spec": "SA-194", "material_grade": "2H" }
       ]
     }
     """
@@ -659,6 +655,36 @@ def refine_material_type(spec, grade, ai_suggested_type="Not Found"):
 
     return "Not Found"
 
+def is_excluded_part(part_name):
+    """
+    Returns True if the part should be removed (Nuts, Bolts, Washers, etc.).
+    This ensures consistent filtering in Python code, not AI guessing.
+    """
+    if not part_name or str(part_name).lower() == 'nan': 
+        return True
+        
+    p = str(part_name).upper().strip()
+    
+    # LIST OF ITEMS TO IGNORE
+    exclude_keywords = [
+        'NUT', 'BOLT', 'WASHER', 'GASKET', 'STUD', 
+        'NAME PLATE', 'NAMEPLATE', 'DATA PLATE',
+        'SUPPORT', 'SADDLE', 'LEG', 'SKIRT', 
+        'CLIP', 'BRACKET', 'LUG', 'LIFTING', 
+        'EARTHING', 'BOSS', 'PAD', 'RIB', 'STIFFENER'
+    ]
+    
+    # 1. Check Keywords
+    if any(k in p for k in exclude_keywords):
+        return True
+        
+    # 2. Check for vague/empty names
+    if len(p) < 2 or p == "PLATE" or p == "PIPE":
+        # Filter headers captured as data
+        if p in ['ITEM', 'NO.', 'QTY', 'DESCRIPTION']: return True
+
+    return False
+
 
 def parse_gemini_response(json_text, drawing_name):
     extracted_data = []
@@ -667,6 +693,7 @@ def parse_gemini_response(json_text, drawing_name):
     except: 
         data = {"parts_list": []}
     
+    # Get the raw list (which now contains EVERYTHING, including nuts/bolts)
     parts = data.get("parts_list", []) or [{"part_name": "Not Found"}]
     
     fluid = data.get("fluid", "Not Found")
@@ -678,13 +705,21 @@ def parse_gemini_response(json_text, drawing_name):
     op_press = data.get("operating_pressure", "Not Found")
 
     for part in parts:
+        raw_name = part.get("part_name", "Not Found")
+        
+        # --- NEW: DETERMINISTIC FILTERING ---
+        # If it's a nut/bolt/gasket, SKIP IT.
+        if is_excluded_part(raw_name):
+            continue
+        # ------------------------------------
+
         raw_spec = part.get("material_spec", "Not Found")
         raw_grade = part.get("material_grade", "Not Found")
         final_type = refine_material_type(raw_spec, raw_grade)
 
         extracted_data.append({
             "source_drawing": drawing_name,
-            "part_name": part.get("part_name", "Not Found"),
+            "part_name": raw_name,
             "fluid": fluid,
             "phase": phase,
             "insulation": insulation,
@@ -696,6 +731,7 @@ def parse_gemini_response(json_text, drawing_name):
             'TEMP. (°C)': op_temp,
             'PRESSURE (Mpa)': op_press
         })
+        
     return extracted_data
 
 # ==================== ROUTES ==================
@@ -882,6 +918,12 @@ def preview_data(temp_file):
         else:
             confidence_score = 0
         # -------------------------
+
+        # --- NEW: GET UNIQUE SOURCE FILES FOR THE PDF VIEWER ---
+        # Extract unique source_drawing names using a set, then convert back to list
+        unique_files = list(set(row['source_drawing'] for row in preview_rows if row.get('source_drawing')))
+        unique_files.sort() # Sort them alphabetically
+        # -------------------------------------------------------
             
         return render_template(
             'preview.html', 
@@ -889,7 +931,8 @@ def preview_data(temp_file):
             equipment_count=equip_count, 
             temp_file=temp_file,
             confidence_score=confidence_score,
-            missing_fields_count=missing_fields_count
+            missing_fields_count=missing_fields_count,
+            unique_files=unique_files # <--- Pass this new variable to the template
         )
     except Exception as e:
         flash(f"Error loading preview: {e}", "error")
