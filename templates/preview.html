@@ -18,12 +18,22 @@
         min-height: 60px;
         background-color: #fff;
     }
-    /* Highlight class for missing fields */
-    .missing-highlight {
-        border-color: #ef4444 !important; /* red-500 */
-        background-color: #fef2f2 !important; /* red-50 */
-        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2) !important;
+    
+    /* FLAMBOYANT HIGHLIGHT FOR MISSING FIELDS */
+    @keyframes pulse-neon {
+        0% { box-shadow: 0 0 0 0 rgba(255, 0, 255, 0.7); }
+        70% { box-shadow: 0 0 0 6px rgba(255, 0, 255, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(255, 0, 255, 0); }
     }
+    
+    .missing-highlight {
+        border: 2px solid #FF00FF !important; /* Neon Magenta */
+        background-color: #FFE6FF !important; /* Light Pink Background */
+        box-shadow: 0 0 10px rgba(255, 0, 255, 0.5) !important;
+        animation: pulse-neon 2s infinite;
+        transition: all 0.3s ease;
+    }
+
     /* Modal Transition */
     .modal-backdrop {
         background-color: rgba(0, 0, 0, 0.5);
@@ -217,8 +227,8 @@
         <input type="hidden" id="total-drawings" value="{{ grouped_data|length }}">
 
         {% for drawing, items in grouped_data %}
-        {% set parent_loop = loop %} 
-        <div id="drawing-{{ loop.index0 }}" class="drawing-section {% if loop.index0 != 0 %}hidden-section{% endif %}">
+        {% set drawing_idx = loop.index0 %}
+        <div id="drawing-{{ drawing_idx }}" class="drawing-section {% if drawing_idx != 0 %}hidden-section{% endif %}" data-drawing-index="{{ drawing_idx }}">
             
             <div class="bg-blue-600 text-white px-6 py-3 rounded-t-lg flex items-center shadow-md">
                 <i data-lucide="file-text" class="w-5 h-5 mr-2"></i>
@@ -229,7 +239,7 @@
             </div>
 
             <div class="overflow-x-auto bg-white shadow-md rounded-b-lg border border-gray-200 mb-8">
-                <table class="min-w-full divide-y divide-gray-300">
+                <table class="min-w-full divide-y divide-gray-300" id="table-{{ drawing_idx }}">
                     <thead class="bg-gray-50">
                         <tr>
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-12">No.</th>
@@ -243,6 +253,7 @@
                             <th class="px-3 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Insulation</th>
                             <th class="px-3 py-3 text-center text-xs font-bold text-white bg-blue-500 uppercase tracking-wider" colspan="2">Design</th>
                             <th class="px-3 py-3 text-center text-xs font-bold text-white bg-green-600 uppercase tracking-wider" colspan="2">Operating</th>
+                            <th class="px-2 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-10">Act</th>
                         </tr>
                         <tr class="bg-gray-100">
                             <th colspan="7"></th>
@@ -254,6 +265,7 @@
                             <th class="px-2 py-1 text-xs font-semibold text-blue-800 border-r">Press (Mpa)</th>
                             <th class="px-2 py-1 text-xs font-semibold text-green-800 border-l">Temp (°C)</th>
                             <th class="px-2 py-1 text-xs font-semibold text-green-800">Press (Mpa)</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
@@ -267,14 +279,14 @@
                             <td class="px-2 py-2">
                                 <input type="text" name="PMT NO." value="{{ row['PMT NO.'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500">
                                 {% if not loop.first %}
-                                <input type="hidden" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}" class="sync-desc-{{ parent_loop.index0 }}">
+                                <input type="hidden" name="EQUIPMENT DESCRIPTION" value="{{ row['EQUIPMENT DESCRIPTION'] }}" class="sync-desc-{{ drawing_idx }}">
                                 {% endif %}
                             </td>
                             
                             {% if loop.first %}
-                            <td class="px-2 py-2 bg-white" rowspan="{{ items|length }}" style="vertical-align: middle;">
+                            <td class="px-2 py-2 bg-white description-cell" rowspan="{{ items|length }}" style="vertical-align: middle;">
                                 <div class="flex flex-col h-full space-y-1">
-                                    <select onchange="updateTextarea(this, '{{ parent_loop.index0 }}')" 
+                                    <select onchange="updateTextarea(this, '{{ drawing_idx }}')" 
                                             class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-gray-600 bg-gray-50">
                                             <option value="" disabled selected>▼ Quick Select...</option>
                                             <option value="Air Receiver">Air Receiver</option>
@@ -289,10 +301,10 @@
                                             <option value="Reflux Condensor of Drying Tower">Reflux Condensor of Drying Tower</option>
                                     </select>
                                     <textarea name="EQUIPMENT DESCRIPTION" 
-                                              id="desc-textarea-{{ parent_loop.index0 }}"
+                                              id="desc-textarea-{{ drawing_idx }}"
                                               class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center font-semibold merged-textarea flex-1 p-2"
                                               placeholder="Type manually or use select above..."
-                                              oninput="syncDescription(this, '{{ parent_loop.index0 }}')">{{ row['EQUIPMENT DESCRIPTION'] }}</textarea>
+                                              oninput="syncDescription(this, '{{ drawing_idx }}')">{{ row['EQUIPMENT DESCRIPTION'] }}</textarea>
                                 </div>
                             </td>
                             {% endif %}
@@ -331,10 +343,21 @@
                             
                             <td class="px-2 py-2 border-l bg-green-50/30"><input type="text" name="TEMP. (°C)" value="{{ row['TEMP. (°C)'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
                             <td class="px-2 py-2 bg-green-50/30"><input type="text" name="PRESSURE (Mpa)" value="{{ row['PRESSURE (Mpa)'] }}" class="w-full text-xs border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-center"></td>
+
+                            <td class="px-2 py-2 text-center">
+                                <button type="button" onclick="deleteRow(this, '{{ drawing_idx }}')" class="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded transition-colors" title="Delete Row">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+                <div class="bg-gray-50 px-4 py-3 border-t border-gray-200 flex justify-center">
+                    <button type="button" onclick="addRow('{{ drawing_idx }}')" class="flex items-center text-sm text-blue-600 hover:text-blue-800 font-bold bg-white border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded shadow-sm transition-all">
+                        <i data-lucide="plus-circle" class="w-4 h-4 mr-1.5"></i> Add Part Row
+                    </button>
+                </div>
             </div>
         </div>
         {% endfor %}
@@ -384,15 +407,12 @@
     let currentIndex = 0;
     const totalDrawings = parseInt(document.getElementById('total-drawings').value);
 
-    // --- NEW: PDF VIEWER LOGIC ---
     function changePdfView() {
         const selector = document.getElementById('pdfSelector');
         if (!selector) return;
-
         const selectedFilename = selector.value;
         const viewerFrame = document.getElementById('pdfViewerFrame');
         const fallbackLink = document.getElementById('fallbackLink');
-        
         if (selectedFilename) {
             const newSrc = `/view_uploaded_file/${encodeURIComponent(selectedFilename)}`;
             viewerFrame.src = newSrc;
@@ -400,51 +420,39 @@
         }
     }
 
-    // --- NEW: VALIDATION AND MODAL LOGIC ---
     function validateAndSave() {
         const inputs = document.querySelectorAll('.critical-field');
         const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
         let hasMissing = false;
-
-        // Check input fields
         for (let input of inputs) {
             const val = input.value.trim().toUpperCase();
             if (missingIndicators.includes(val) || val.includes('NOT FOUND') || val.includes('UNKNOWN')) {
                 hasMissing = true;
-                break; // Found one, that's enough to show warning
+                break; 
             }
         }
-
         if (hasMissing) {
-            // Show Modal
             const modal = document.getElementById('confirmationModal');
             modal.classList.remove('hidden');
-            // Re-initialize icons inside modal if needed
             if (typeof lucide !== 'undefined') lucide.createIcons();
         } else {
-            // Submit directly if data is clean
             document.getElementById('data-form').submit();
         }
     }
 
-    // Modal Action: Proceed
     document.getElementById('proceedBtn').addEventListener('click', function() {
         document.getElementById('data-form').submit();
     });
 
-    // Modal Action: Close
     function closeModal() {
         document.getElementById('confirmationModal').classList.add('hidden');
     }
 
-    // --- EXISTING HELPER FUNCTIONS ---
     function calculateStats() {
         const inputs = document.querySelectorAll('.critical-field');
         const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
-        
         let total = 0;
         let missing = 0;
-
         inputs.forEach(input => {
             total++;
             const val = input.value.trim().toUpperCase();
@@ -453,18 +461,13 @@
             else if (val.includes('NOT FOUND') || val.includes('UNKNOWN')) isMissing = true;
             if (isMissing) missing++;
         });
-
         const score = total > 0 ? Math.round(((total - missing) / total) * 100) : 0;
-        
         document.getElementById('missing-count-display').innerText = missing;
         document.getElementById('confidence-display').innerText = score + '%';
-        
         const card = document.getElementById('confidence-card');
         const icon = document.getElementById('confidence-icon');
-        
         card.className = "bg-white rounded-lg shadow-md p-6 border-l-4 flex flex-col justify-between transition-colors duration-300";
         icon.className = "h-12 w-12 rounded-full flex items-center justify-center transition-colors duration-300";
-
         if (score > 80) {
             card.classList.add('border-green-500');
             icon.classList.add('bg-green-100', 'text-green-600');
@@ -481,13 +484,11 @@
         const inputs = document.querySelectorAll('.critical-field');
         const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
         let firstMissing = null;
-
         inputs.forEach(input => {
             const val = input.value.trim().toUpperCase();
             let isMissing = false;
             if (missingIndicators.includes(val)) isMissing = true;
             else if (val.includes('NOT FOUND') || val.includes('UNKNOWN')) isMissing = true;
-
             if (isMissing) {
                 input.classList.add('missing-highlight');
                 input.addEventListener('input', function() {
@@ -498,12 +499,10 @@
                 input.classList.remove('missing-highlight');
             }
         });
-
         if (firstMissing) {
             let parentSection = firstMissing.closest('.drawing-section');
             if (parentSection) {
-                let id = parentSection.id; 
-                let index = parseInt(id.split('-')[1]);
+                let index = parseInt(parentSection.getAttribute('data-drawing-index'));
                 if (index !== currentIndex) {
                     currentIndex = index;
                     updateView();
@@ -537,11 +536,9 @@
         }
         const currentEl = document.getElementById(`drawing-${currentIndex}`);
         if (currentEl) currentEl.classList.remove('hidden-section');
-
         document.getElementById('prev-btn').disabled = (currentIndex === 0);
         document.getElementById('next-btn').disabled = (currentIndex === totalDrawings - 1);
         document.getElementById('page-indicator').innerText = `Drawing ${currentIndex + 1} of ${totalDrawings}`;
-        
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -551,6 +548,122 @@
             currentIndex = newIndex;
             updateView();
         }
+    }
+
+    // --- NEW: ROW MANIPULATION FUNCTIONS ---
+
+    function addRow(drawingIndex) {
+        const table = document.getElementById(`table-${drawingIndex}`);
+        const tbody = table.querySelector('tbody');
+        const rows = tbody.querySelectorAll('tr');
+        const lastRow = rows[rows.length - 1];
+        
+        // Clone the last row
+        const newRow = lastRow.cloneNode(true);
+        
+        // --- 1. CLEAN UP DESCRIPTION COLUMN ---
+        // If we are cloning the FIRST row (which has the rowspan), we need to REMOVE that cell 
+        // from the clone because the original first row already covers this space.
+        // Instead, we add a hidden input to keep data synced.
+        const descCell = newRow.querySelector('.description-cell');
+        if (descCell) {
+            descCell.remove(); // Remove the visual cell
+        }
+        
+        // Ensure there is a hidden input for description in the correct column position
+        const pmtCell = newRow.querySelectorAll('td')[2]; // 3rd cell (index 2) is PMT NO
+        
+        // Check if hidden input exists in clone, if not add it
+        let hiddenDesc = pmtCell.querySelector(`input[name="EQUIPMENT DESCRIPTION"]`);
+        if (!hiddenDesc) {
+            hiddenDesc = document.createElement('input');
+            hiddenDesc.type = 'hidden';
+            hiddenDesc.name = 'EQUIPMENT DESCRIPTION';
+            hiddenDesc.className = `sync-desc-${drawingIndex}`;
+            pmtCell.appendChild(hiddenDesc);
+        }
+        
+        // Get current description value from the master textarea
+        const masterTextarea = document.getElementById(`desc-textarea-${drawingIndex}`);
+        if (masterTextarea) hiddenDesc.value = masterTextarea.value;
+
+        // --- 2. CLEAR OTHER INPUTS ---
+        const inputs = newRow.querySelectorAll('input:not([type="hidden"])');
+        inputs.forEach(input => {
+            // Keep Equipment No and PMT No, clear others
+            if (input.name !== 'EQUIPMENT NO. ' && input.name !== 'PMT NO.') {
+                input.value = '';
+                input.classList.remove('missing-highlight');
+            }
+        });
+
+        // --- 3. RE-BIND EVENTS ---
+        const criticalFields = newRow.querySelectorAll('.critical-field');
+        criticalFields.forEach(field => {
+            field.addEventListener('input', calculateStats);
+        });
+
+        // --- 4. UPDATE ROWSPAN OF THE FIRST ROW ---
+        // Find the first row's description cell and increment rowspan
+        const firstRow = tbody.rows[0];
+        const firstDescCell = firstRow.querySelector('.description-cell');
+        if (firstDescCell) {
+            let currentSpan = parseInt(firstDescCell.getAttribute('rowspan')) || 1;
+            firstDescCell.setAttribute('rowspan', currentSpan + 1);
+        }
+
+        tbody.appendChild(newRow);
+        
+        // Re-initialize icons for the new row
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function deleteRow(btn, drawingIndex) {
+        const row = btn.closest('tr');
+        const tbody = row.parentNode;
+        
+        if (tbody.rows.length <= 1) {
+            alert("Cannot delete the last row.");
+            return;
+        }
+
+        const firstRow = tbody.rows[0];
+        const isFirstRow = (row === firstRow);
+        
+        // --- HANDLING ROWSPAN LOGIC ---
+        if (isFirstRow) {
+            // If deleting the first row, we must transfer the Description Cell (textarea) to the NEXT row
+            const secondRow = tbody.rows[1];
+            const descCell = row.querySelector('.description-cell'); // The cell with rowspan
+            
+            if (descCell && secondRow) {
+                // Decrement rowspan since we are deleting one row
+                let currentSpan = parseInt(descCell.getAttribute('rowspan')) || 1;
+                descCell.setAttribute('rowspan', currentSpan - 1);
+                
+                // Move the cell to the second row (insert after PMT cell, which is index 2)
+                const pmtCellIndex = 2; 
+                if (secondRow.cells.length > pmtCellIndex) {
+                     secondRow.insertBefore(descCell, secondRow.cells[pmtCellIndex + 1]);
+                }
+                
+                // Remove the hidden input from the second row (since it now has the main textarea)
+                const hiddenDesc = secondRow.querySelector(`input[name="EQUIPMENT DESCRIPTION"]`);
+                if (hiddenDesc) hiddenDesc.remove();
+            }
+        } else {
+            // If deleting a normal row, just find the first row and decrement its rowspan
+            const firstDescCell = firstRow.querySelector('.description-cell');
+            if (firstDescCell) {
+                let currentSpan = parseInt(firstDescCell.getAttribute('rowspan')) || 1;
+                if (currentSpan > 1) {
+                    firstDescCell.setAttribute('rowspan', currentSpan - 1);
+                }
+            }
+        }
+
+        row.remove();
+        calculateStats(); // Update stats after delete
     }
 
     document.addEventListener('DOMContentLoaded', () => {

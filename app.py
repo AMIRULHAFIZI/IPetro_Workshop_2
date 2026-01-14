@@ -1130,11 +1130,13 @@ def send_files_email():
         flash("Please enter an email address.", "error")
         return redirect(url_for('index'))
 
-    if not os.path.exists(ppt_path):
-        print("PPT missing, generating now...")
-        generated_path = generate_ppt_internal(excel_file)
-        if not generated_path:
-            flash("Warning: Could not generate PowerPoint attachment.", "error")
+# --- FIX: FORCE REGENERATION ---
+    print(f"Generating fresh PPT for email: {excel_file}")
+    generated_path = generate_ppt_internal(excel_file)
+    
+    if not generated_path or not os.path.exists(ppt_path):
+        flash("Warning: Could not generate PowerPoint attachment.", "error")
+    # -------------------------------
 
     try:
         msg = Message("Generated Inspection Files", recipients=[recipient])
