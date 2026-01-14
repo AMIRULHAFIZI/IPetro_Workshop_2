@@ -38,7 +38,9 @@
             <p class="text-4xl font-bold text-gray-900 mt-2">{{ engineer_count }}</p>
         </div>
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+    <!-- Updated to grid-cols-1 since there is only one button now -->
+    <div class="grid grid-cols-1 gap-6 mb-8">
         
         <a href="{{ url_for('manager_reports') }}" 
            class="flex items-center justify-center p-6 bg-indigo-600 rounded-lg shadow-lg text-white 
@@ -47,13 +49,8 @@
             <span class="text-xl font-bold">Access Detailed Reports</span>
         </a>
 
-        <a href="{{ url_for('manager_review_queue') }}" 
-           class="flex items-center justify-center p-6 bg-red-600 rounded-lg shadow-lg text-white 
-                  hover:bg-red-700 transition-transform transform hover:scale-[1.02]">
-            <i data-lucide="alert-circle" class="w-8 h-8 mr-4"></i>
-            <span class="text-xl font-bold">View Final Review Queue</span>
-        </a>
     </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         <div class="bg-white p-6 rounded-lg shadow-md">

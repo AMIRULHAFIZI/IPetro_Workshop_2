@@ -56,8 +56,12 @@
             </div>
             <div class="mt-4 pt-4 border-t border-slate-700 text-sm">
                 <div class="flex justify-between items-center mb-1">
-                    <span class="text-slate-400">Admins:</span>
+                    <span class="text-slate-400">Admin:</span>
                     <span class="font-semibold text-white">{{ admin_count | default('0') }}</span>
+                </div>
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-slate-400">Managers:</span>
+                    <span class="font-semibold text-white">{{ manager_count | default('0') }}</span>
                 </div>
                 <div class="flex justify-between items-center">
                     <span class="text-slate-400">Engineers:</span>
@@ -92,35 +96,49 @@
         </div>
         <!-- ***** END MODIFIED CARD ***** -->
 
-        <!-- Placeholder Card 3 -->
+        <!-- Card 3: Pending Tasks (Flagged Data) -->
         <div class="stat-card bg-slate-800 p-6 rounded-lg shadow-lg text-white">
             <div class="flex items-center space-x-4">
-                <div class="flex-shrink-0 bg-yellow-500/20 text-yellow-300 p-3 rounded-full">
-                    <i data-lucide="bar-chart-3" class="w-7 h-7"></i>
+                <!-- Change icon color based on count -->
+                <div class="flex-shrink-0 {{ 'bg-yellow-500/20 text-yellow-300' if pending_tasks > 0 else 'bg-slate-700 text-slate-500' }} p-3 rounded-full">
+                    <i data-lucide="clipboard-list" class="w-7 h-7"></i>
                 </div>
                 <div>
-                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">Pending Tasks</p>
-                    <p class="text-3xl font-bold text-white">0</p>
+                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">Flagged Data</p>
+                    <p class="text-3xl font-bold text-white">{{ pending_tasks | default('0') }}</p>
                 </div>
             </div>
              <div class="mt-4 pt-4 border-t border-slate-700 text-sm text-slate-400">
-                No pending jobs.
+                {% if pending_tasks and pending_tasks > 0 %}
+                    <span class="text-yellow-400 font-semibold">{{ pending_tasks }} items</span> require review.
+                {% else %}
+                    No data flagged for review.
+                {% endif %}
             </div>
         </div>
 
-        <!-- Placeholder Card 4 -->
+        <!-- Card 4: System Alerts (Failed Batches) -->
         <div class="stat-card bg-slate-800 p-6 rounded-lg shadow-lg text-white">
             <div class="flex items-center space-x-4">
-                <div class="flex-shrink-0 bg-red-500/20 text-red-300 p-3 rounded-full">
-                    <i data-lucide="alert-triangle" class="w-7 h-7"></i>
+                <!-- Change icon color to RED if alerts exist -->
+                <div class="flex-shrink-0 {{ 'bg-red-500/20 text-red-300' if system_alerts > 0 else 'bg-green-500/20 text-green-300' }} p-3 rounded-full">
+                    {% if system_alerts > 0 %}
+                        <i data-lucide="alert-octagon" class="w-7 h-7"></i>
+                    {% else %}
+                        <i data-lucide="check-circle-2" class="w-7 h-7"></i>
+                    {% endif %}
                 </div>
                 <div>
-                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">System Alerts</p>
-                    <p class="text-3xl font-bold text-white">0</p>
+                    <p class="text-sm font-medium text-slate-400 uppercase tracking-wider">System Health</p>
+                    <p class="text-3xl font-bold text-white">{{ system_alerts | default('0') }}</p>
                 </div>
             </div>
              <div class="mt-4 pt-4 border-t border-slate-700 text-sm text-slate-400">
-                All systems nominal.
+                {% if system_alerts and system_alerts > 0 %}
+                    <span class="text-red-400 font-semibold">{{ system_alerts }} empty batches</span> detected.
+                {% else %}
+                    All systems nominal.
+                {% endif %}
             </div>
         </div>
     </div>

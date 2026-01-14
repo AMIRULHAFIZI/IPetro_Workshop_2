@@ -1274,7 +1274,40 @@ def admin_dashboard():
     today = datetime.utcnow().date()
     f_today = History.query.filter(History.created_at >= datetime.combine(today, time.min), History.created_at <= datetime.combine(today, time.max)).count()
     recent = User.query.order_by(User.user_id.desc()).limit(5).all()
-    return render_template('dashboard_admin.html', user_count=u_count, admin_count=admin_count, manager_count=manager_count, engineer_count=engineer_count, file_count_total=f_total, file_count_today=f_today, recent_users=recent)
+
+    # --- NEW LOGIC START ---
+    
+    # 1. Pending Tasks / Flagged Items
+    # Count how many rows have 'Not Found' in critical fields
+    pending_tasks_count = EquipmentData.query.filter(
+        (EquipmentData.material_type.ilike('%Not Found%')) | 
+        (EquipmentData.material_spec.ilike('%Not Found%'))
+    ).count()
+
+    # 2. System Alerts (Suggestion #2)
+    # Check recent history batches. If a batch has 0 associated data rows, it's a "Failed Batch"
+    system_alerts_count = 0
+    # Look at the last 20 batches
+    recent_batches = History.query.order_by(History.created_at.desc()).limit(20).all()
+    for batch in recent_batches:
+        # If no rows are linked to this history ID, it's an empty/failed batch
+        if not batch.equipment_data_rows:
+            system_alerts_count += 1
+            
+    # --- NEW LOGIC END ---
+
+    return render_template(
+        'dashboard_admin.html', 
+        user_count=u_count, 
+        admin_count=admin_count, 
+        manager_count=manager_count, 
+        engineer_count=engineer_count, 
+        file_count_total=f_total, 
+        file_count_today=f_today, 
+        recent_users=recent,
+        pending_tasks=pending_tasks_count, # Pass new variable
+        system_alerts=system_alerts_count  # Pass new variable
+    )
 
 @app.route('/admin/create-user', methods=['GET', 'POST'])
 @login_required
