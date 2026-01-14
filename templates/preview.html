@@ -150,7 +150,7 @@
                         The system will automatically attach the Excel and PowerPoint files.
                     </p>
                 </div>
-                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors flex justify-center items-center">
+                <button type="submit" onclick="showLoading(this)" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors flex justify-center items-center">
                     <i data-lucide="send" class="w-4 h-4 mr-2"></i> Send Email
                 </button>
             </form>
@@ -407,6 +407,7 @@
     let currentIndex = 0;
     const totalDrawings = parseInt(document.getElementById('total-drawings').value);
 
+    // --- VIEW LOGIC ---
     function changePdfView() {
         const selector = document.getElementById('pdfSelector');
         if (!selector) return;
@@ -420,32 +421,109 @@
         }
     }
 
-    function validateAndSave() {
-        const inputs = document.querySelectorAll('.critical-field');
-        const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
-        let hasMissing = false;
-        for (let input of inputs) {
-            const val = input.value.trim().toUpperCase();
-            if (missingIndicators.includes(val) || val.includes('NOT FOUND') || val.includes('UNKNOWN')) {
-                hasMissing = true;
-                break; 
-            }
+    function updateView() {
+        // Hide all sections
+        for (let i = 0; i < totalDrawings; i++) {
+            const el = document.getElementById(`drawing-${i}`);
+            if (el) el.classList.add('hidden-section');
         }
-        if (hasMissing) {
-            const modal = document.getElementById('confirmationModal');
-            modal.classList.remove('hidden');
-            if (typeof lucide !== 'undefined') lucide.createIcons();
-        } else {
-            document.getElementById('data-form').submit();
+        // Show current section
+        const currentEl = document.getElementById(`drawing-${currentIndex}`);
+        if (currentEl) currentEl.classList.remove('hidden-section');
+        
+        // Update Buttons
+        document.getElementById('prev-btn').disabled = (currentIndex === 0);
+        document.getElementById('next-btn').disabled = (currentIndex === totalDrawings - 1);
+        document.getElementById('page-indicator').innerText = `Drawing ${currentIndex + 1} of ${totalDrawings}`;
+        
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function changeDrawing(direction) {
+        const newIndex = currentIndex + direction;
+        if (newIndex >= 0 && newIndex < totalDrawings) {
+            currentIndex = newIndex;
+            updateView();
         }
     }
 
-    document.getElementById('proceedBtn').addEventListener('click', function() {
-        document.getElementById('data-form').submit();
-    });
+    // --- DATA SYNCING ---
+    function syncDescription(masterInput, drawingIndex) {
+        const hiddenInputs = document.querySelectorAll(`.sync-desc-${drawingIndex}`);
+        hiddenInputs.forEach(input => { input.value = masterInput.value; });
+    }
 
-    function closeModal() {
-        document.getElementById('confirmationModal').classList.add('hidden');
+    function updateTextarea(selectElement, drawingIndex) {
+        const textarea = document.getElementById(`desc-textarea-${drawingIndex}`);
+        textarea.value = selectElement.value;
+        syncDescription(textarea, drawingIndex);
+        selectElement.selectedIndex = 0;
+    }
+
+    // --- HIGHLIGHT & STATS LOGIC (UPDATED) ---
+    function highlightMissing() {
+        const inputs = document.querySelectorAll('.critical-field');
+        // Define what counts as "Missing"
+        const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
+        
+        let firstMissingGlobal = null;  // First missing item anywhere
+        let firstMissingOnPage = null;  // First missing item on current visible page
+        
+        inputs.forEach(input => {
+            const val = input.value.trim().toUpperCase();
+            let isMissing = false;
+            
+            // Check if value is in our missing list OR contains "NOT FOUND"
+            if (missingIndicators.includes(val)) isMissing = true;
+            else if (val.includes('NOT FOUND') || val.includes('UNKNOWN')) isMissing = true;
+            
+            if (isMissing) {
+                // Apply the Neon Highlight Class
+                input.classList.add('missing-highlight');
+                
+                // Add listener to remove highlight when user types
+                input.addEventListener('input', function() {
+                    this.classList.remove('missing-highlight');
+                }, { once: true });
+
+                // Capture locations
+                if (!firstMissingGlobal) firstMissingGlobal = input;
+                
+                // Check if this input is on the CURRENT visible drawing
+                let parentSection = input.closest('.drawing-section');
+                let parentIndex = parentSection ? parseInt(parentSection.getAttribute('data-drawing-index')) : -1;
+                
+                if (parentIndex === currentIndex && !firstMissingOnPage) {
+                    firstMissingOnPage = input;
+                }
+            } else {
+                input.classList.remove('missing-highlight');
+            }
+        });
+
+        // --- INTELLIGENT SCROLLING ---
+        // 1. If there is a missing item on the CURRENT page, scroll to it (Don't switch pages)
+        if (firstMissingOnPage) {
+            firstMissingOnPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            firstMissingOnPage.focus();
+        } 
+        // 2. If current page is clean, but other pages have errors, switch to that page
+        else if (firstMissingGlobal) {
+            let parentSection = firstMissingGlobal.closest('.drawing-section');
+            if (parentSection) {
+                let index = parseInt(parentSection.getAttribute('data-drawing-index'));
+                if (index !== currentIndex) {
+                    currentIndex = index;
+                    updateView(); // This switches the tab
+                }
+            }
+            // Delay scroll slightly to allow View Switch to finish
+            setTimeout(() => {
+                firstMissingGlobal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                firstMissingGlobal.focus();
+            }, 100);
+        }
     }
 
     function calculateStats() {
@@ -464,10 +542,15 @@
         const score = total > 0 ? Math.round(((total - missing) / total) * 100) : 0;
         document.getElementById('missing-count-display').innerText = missing;
         document.getElementById('confidence-display').innerText = score + '%';
+        
+        // Update Card Colors
         const card = document.getElementById('confidence-card');
         const icon = document.getElementById('confidence-icon');
+        
+        // Reset classes
         card.className = "bg-white rounded-lg shadow-md p-6 border-l-4 flex flex-col justify-between transition-colors duration-300";
         icon.className = "h-12 w-12 rounded-full flex items-center justify-center transition-colors duration-300";
+        
         if (score > 80) {
             card.classList.add('border-green-500');
             icon.classList.add('bg-green-100', 'text-green-600');
@@ -480,100 +563,19 @@
         }
     }
 
-    function highlightMissing() {
-        const inputs = document.querySelectorAll('.critical-field');
-        const missingIndicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE'];
-        let firstMissing = null;
-        inputs.forEach(input => {
-            const val = input.value.trim().toUpperCase();
-            let isMissing = false;
-            if (missingIndicators.includes(val)) isMissing = true;
-            else if (val.includes('NOT FOUND') || val.includes('UNKNOWN')) isMissing = true;
-            if (isMissing) {
-                input.classList.add('missing-highlight');
-                input.addEventListener('input', function() {
-                    this.classList.remove('missing-highlight');
-                }, { once: true });
-                if (!firstMissing) firstMissing = input;
-            } else {
-                input.classList.remove('missing-highlight');
-            }
-        });
-        if (firstMissing) {
-            let parentSection = firstMissing.closest('.drawing-section');
-            if (parentSection) {
-                let index = parseInt(parentSection.getAttribute('data-drawing-index'));
-                if (index !== currentIndex) {
-                    currentIndex = index;
-                    updateView();
-                }
-            }
-            setTimeout(() => {
-                firstMissing.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                firstMissing.focus();
-            }, 100);
-        }
-    }
-
-    function syncDescription(masterInput, drawingIndex) {
-        const hiddenInputs = document.querySelectorAll(`.sync-desc-${drawingIndex}`);
-        hiddenInputs.forEach(input => {
-            input.value = masterInput.value;
-        });
-    }
-
-    function updateTextarea(selectElement, drawingIndex) {
-        const textarea = document.getElementById(`desc-textarea-${drawingIndex}`);
-        textarea.value = selectElement.value;
-        syncDescription(textarea, drawingIndex);
-        selectElement.selectedIndex = 0;
-    }
-
-    function updateView() {
-        for (let i = 0; i < totalDrawings; i++) {
-            const el = document.getElementById(`drawing-${i}`);
-            if (el) el.classList.add('hidden-section');
-        }
-        const currentEl = document.getElementById(`drawing-${currentIndex}`);
-        if (currentEl) currentEl.classList.remove('hidden-section');
-        document.getElementById('prev-btn').disabled = (currentIndex === 0);
-        document.getElementById('next-btn').disabled = (currentIndex === totalDrawings - 1);
-        document.getElementById('page-indicator').innerText = `Drawing ${currentIndex + 1} of ${totalDrawings}`;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function changeDrawing(direction) {
-        const newIndex = currentIndex + direction;
-        if (newIndex >= 0 && newIndex < totalDrawings) {
-            currentIndex = newIndex;
-            updateView();
-        }
-    }
-
-    // --- NEW: ROW MANIPULATION FUNCTIONS ---
-
+    // --- ROW OPERATIONS ---
     function addRow(drawingIndex) {
         const table = document.getElementById(`table-${drawingIndex}`);
         const tbody = table.querySelector('tbody');
         const rows = tbody.querySelectorAll('tr');
         const lastRow = rows[rows.length - 1];
-        
-        // Clone the last row
         const newRow = lastRow.cloneNode(true);
         
-        // --- 1. CLEAN UP DESCRIPTION COLUMN ---
-        // If we are cloning the FIRST row (which has the rowspan), we need to REMOVE that cell 
-        // from the clone because the original first row already covers this space.
-        // Instead, we add a hidden input to keep data synced.
+        // Fix Description Column Rowspan
         const descCell = newRow.querySelector('.description-cell');
-        if (descCell) {
-            descCell.remove(); // Remove the visual cell
-        }
+        if (descCell) descCell.remove();
         
-        // Ensure there is a hidden input for description in the correct column position
-        const pmtCell = newRow.querySelectorAll('td')[2]; // 3rd cell (index 2) is PMT NO
-        
-        // Check if hidden input exists in clone, if not add it
+        const pmtCell = newRow.querySelectorAll('td')[2];
         let hiddenDesc = pmtCell.querySelector(`input[name="EQUIPMENT DESCRIPTION"]`);
         if (!hiddenDesc) {
             hiddenDesc = document.createElement('input');
@@ -582,29 +584,24 @@
             hiddenDesc.className = `sync-desc-${drawingIndex}`;
             pmtCell.appendChild(hiddenDesc);
         }
-        
-        // Get current description value from the master textarea
         const masterTextarea = document.getElementById(`desc-textarea-${drawingIndex}`);
         if (masterTextarea) hiddenDesc.value = masterTextarea.value;
 
-        // --- 2. CLEAR OTHER INPUTS ---
+        // Clear Inputs
         const inputs = newRow.querySelectorAll('input:not([type="hidden"])');
         inputs.forEach(input => {
-            // Keep Equipment No and PMT No, clear others
             if (input.name !== 'EQUIPMENT NO. ' && input.name !== 'PMT NO.') {
                 input.value = '';
                 input.classList.remove('missing-highlight');
             }
         });
 
-        // --- 3. RE-BIND EVENTS ---
-        const criticalFields = newRow.querySelectorAll('.critical-field');
-        criticalFields.forEach(field => {
+        // Re-bind Events
+        newRow.querySelectorAll('.critical-field').forEach(field => {
             field.addEventListener('input', calculateStats);
         });
 
-        // --- 4. UPDATE ROWSPAN OF THE FIRST ROW ---
-        // Find the first row's description cell and increment rowspan
+        // Update First Row Span
         const firstRow = tbody.rows[0];
         const firstDescCell = firstRow.querySelector('.description-cell');
         if (firstDescCell) {
@@ -613,66 +610,74 @@
         }
 
         tbody.appendChild(newRow);
-        
-        // Re-initialize icons for the new row
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     function deleteRow(btn, drawingIndex) {
         const row = btn.closest('tr');
         const tbody = row.parentNode;
-        
         if (tbody.rows.length <= 1) {
             alert("Cannot delete the last row.");
             return;
         }
-
         const firstRow = tbody.rows[0];
         const isFirstRow = (row === firstRow);
-        
-        // --- HANDLING ROWSPAN LOGIC ---
         if (isFirstRow) {
-            // If deleting the first row, we must transfer the Description Cell (textarea) to the NEXT row
             const secondRow = tbody.rows[1];
-            const descCell = row.querySelector('.description-cell'); // The cell with rowspan
-            
+            const descCell = row.querySelector('.description-cell');
             if (descCell && secondRow) {
-                // Decrement rowspan since we are deleting one row
                 let currentSpan = parseInt(descCell.getAttribute('rowspan')) || 1;
                 descCell.setAttribute('rowspan', currentSpan - 1);
-                
-                // Move the cell to the second row (insert after PMT cell, which is index 2)
                 const pmtCellIndex = 2; 
-                if (secondRow.cells.length > pmtCellIndex) {
-                     secondRow.insertBefore(descCell, secondRow.cells[pmtCellIndex + 1]);
-                }
-                
-                // Remove the hidden input from the second row (since it now has the main textarea)
+                if (secondRow.cells.length > pmtCellIndex) secondRow.insertBefore(descCell, secondRow.cells[pmtCellIndex + 1]);
                 const hiddenDesc = secondRow.querySelector(`input[name="EQUIPMENT DESCRIPTION"]`);
                 if (hiddenDesc) hiddenDesc.remove();
             }
         } else {
-            // If deleting a normal row, just find the first row and decrement its rowspan
             const firstDescCell = firstRow.querySelector('.description-cell');
             if (firstDescCell) {
                 let currentSpan = parseInt(firstDescCell.getAttribute('rowspan')) || 1;
-                if (currentSpan > 1) {
-                    firstDescCell.setAttribute('rowspan', currentSpan - 1);
-                }
+                if (currentSpan > 1) firstDescCell.setAttribute('rowspan', currentSpan - 1);
             }
         }
-
         row.remove();
-        calculateStats(); // Update stats after delete
+        calculateStats();
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        if (typeof lucide !== 'undefined') {
-            lucide.createIcons();
+    // --- EMAIL LOADING ---
+    function showLoading(btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-75', 'cursor-not-allowed'); 
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 mr-2 animate-spin"></i>Sending Email...`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        btn.closest('form').submit();
+    }
+
+    function validateAndSave() {
+        // Simple check before saving
+        const inputs = document.querySelectorAll('.critical-field');
+        let hasMissing = false;
+        inputs.forEach(input => {
+            if(input.classList.contains('missing-highlight') || input.value.includes('Not Found')) hasMissing = true;
+        });
+        
+        if (hasMissing) {
+            document.getElementById('confirmationModal').classList.remove('hidden');
+        } else {
+            document.getElementById('data-form').submit();
         }
+    }
+    document.getElementById('proceedBtn').addEventListener('click', function() {
+        document.getElementById('data-form').submit();
+    });
+    function closeModal() { document.getElementById('confirmationModal').classList.add('hidden'); }
+
+    // --- INITIALIZATION ---
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof lucide !== 'undefined') lucide.createIcons();
         updateView();
         changePdfView(); 
-
+        
         const inputs = document.querySelectorAll('.critical-field');
         inputs.forEach(input => {
             input.addEventListener('input', calculateStats);

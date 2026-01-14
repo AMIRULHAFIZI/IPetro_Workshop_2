@@ -307,25 +307,25 @@ def generate_ppt_internal(filename):
                 slide = duplicate_slide(prs, 0)
                 
                 # Overlay Text Boxes
-                txBox_desc = slide.shapes.add_textbox(Inches(2.6), Inches(0.55), Inches(3.5), Inches(0.4))
+                txBox_desc = slide.shapes.add_textbox(Inches(3.3), Inches(0.55), Inches(3.5), Inches(0.4))
                 tf_desc = txBox_desc.text_frame
                 tf_desc.text = current_desc
-                tf_desc.paragraphs[0].font.size = Pt(10)
-                tf_desc.paragraphs[0].font.name = 'Arial'
+                tf_desc.paragraphs[0].font.size = Pt(8)
+                tf_desc.paragraphs[0].font.name = 'Times New Roman'
                 tf_desc.paragraphs[0].font.bold = True
 
                 txBox_tag = slide.shapes.add_textbox(Inches(6.3), Inches(0.55), Inches(1.8), Inches(0.4))
                 tf_tag = txBox_tag.text_frame
                 tf_tag.text = current_tag
-                tf_tag.paragraphs[0].font.size = Pt(11) 
-                tf_tag.paragraphs[0].font.name = 'Arial'
+                tf_tag.paragraphs[0].font.size = Pt(8) 
+                tf_tag.paragraphs[0].font.name = 'Times New Roman'
                 tf_tag.paragraphs[0].font.bold = True
 
-                txBox_pmt = slide.shapes.add_textbox(Inches(9.5), Inches(0.55), Inches(1.8), Inches(0.4))
+                txBox_pmt = slide.shapes.add_textbox(Inches(8.5), Inches(0.55), Inches(1.8), Inches(0.4))
                 tf_pmt = txBox_pmt.text_frame
                 tf_pmt.text = current_pmt
-                tf_pmt.paragraphs[0].font.size = Pt(10)
-                tf_pmt.paragraphs[0].font.name = 'Arial'
+                tf_pmt.paragraphs[0].font.size = Pt(6)
+                tf_pmt.paragraphs[0].font.name = 'Times New Roman'
                 tf_pmt.paragraphs[0].font.bold = True
 
                 # Fill Table
@@ -609,11 +609,12 @@ def call_gemini_api(images, prompt, api_key):
         img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_base64}})
     
-    # Updated Payload with Generation Config for JSON enforcement
+    # --- UPDATED PAYLOAD WITH TEMPERATURE 0.0 ---
     payload = {
         "contents": [{"parts": parts}],
         "generationConfig": {
-            "responseMimeType": "application/json"
+            "responseMimeType": "application/json",
+            "temperature": 0.0  # <--- THIS IS THE FIX. 0.0 = Maximum Consistency.
         }
     }
     
@@ -639,18 +640,32 @@ def refine_material_type(spec, grade, ai_suggested_type="Not Found"):
     g = str(grade).upper() if grade else ""
     t = str(ai_suggested_type).upper() if ai_suggested_type else ""
 
+    # --- Structural & Hardware ---
     if "S275" in s or "S275" in g or "JR" in g: return "Structural Steel"
     if "193" in s or "193" in g: return "Stainless Steel Bolting"
     if "194" in s or "194" in g: return "Heavy Hex Nuts"
+    
+    # --- Carbon Steel Group ---
+    # Added SA-283 based on your table. SA-516 was already here.
     if "G3507" in s or "G3507" in g: return "Carbon Steel"
+    if any(x in s for x in ["SA-106", "SA-105", "SA-516", "SA-283", "API 5L", "A106", "A516"]):
+        return "Carbon Steel"
 
-    if "304" in g or "316" in g or "321" in g or "347" in g: return "Stainless Steel"
-    if "SA-240" in s or "SA-312" in s or "SA-182" in s:
-        if "F11" not in g and "F22" not in g: return "Stainless Steel"
+    # --- Stainless Steel Group ---
+    # Added SA-213, SA-403, A-240 based on your table.
+    if any(x in g for x in ["304", "316", "321", "347"]): return "Stainless Steel"
+    
+    stainless_specs = ["SA-240", "SA-312", "SA-182", "SA-213", "SA-403", "A-240"]
+    if any(x in s for x in stainless_specs):
+        # Ensure we don't accidentally catch Alloy Steel grades (F11/F22) often found with SA-182
+        if "F11" not in g and "F22" not in g: 
+            return "Stainless Steel"
+
+    # --- Duplex & Alloy ---
     if "2205" in g or "S31803" in g: return "Duplex SS"
-    if "SA-106" in s or "SA-105" in s or "SA-516" in s or "API 5L" in s or "A106" in s or "A516" in s: return "Carbon Steel"
     if "F11" in g or "F22" in g or "P11" in g or "P22" in g: return "Alloy Steel"
 
+    # --- Fallback to AI ---
     if t and t != "NOT FOUND" and t != "NONE" and t != "OTHER": return ai_suggested_type
 
     return "Not Found"
@@ -848,53 +863,46 @@ def preview_data(temp_file):
             raw = json.load(f)
         
         preview_rows = []
-        equip_count = 0
-        curr_drawing = ""
+        
+        # --- COUNTER VARIABLES ---
+        row_counter = 0        # Counts every single row (1, 2, 3, 4...)
+        equip_count = 0        # Counts drawings (V-001, V-002...)
+        curr_drawing = ""      # Tracks the current file being processed
 
-        # --- STATISTICS CALCULATION VARIABLES ---
+        # Stats variables
         total_critical_fields = 0
         filled_critical_fields = 0
         missing_fields_count = 0
         
-        # Fields we expect the AI to find (Added 'insulation' and 'phase')
         critical_keys = [
             'part_name', 'fluid', 'material_type', 'material_spec', 
             'material_grade', 'TEMP. (°C) ', 'PRESSURE (Mpa) ',
             'insulation', 'phase'
         ]
-        
-        # List of values that define "Missing Data"
         missing_indicators = ['', 'NOT FOUND', 'NONE', '-', 'NAN', 'N/A', 'UNKNOWN', 'TBA', 'TBD', 'NOT APPLICABLE']
 
         for d in raw:
+            # --- FIX: Only increment Equipment No. if the file changes ---
             if d['source_drawing'] != curr_drawing:
-                equip_count += 1
+                equip_count += 1                  # New File = New V-Number
                 curr_drawing = d['source_drawing']
             
-            # --- CALCULATE SCORE FOR THIS ROW ---
+            row_counter += 1  # Always increment for the 'No.' column
+
+            # Stats Calculation
             for k in critical_keys:
                 total_critical_fields += 1
-                # Clean the value: remove dots, extra spaces, convert to upper
                 val = str(d.get(k, '')).strip().upper()
-                
-                # Broadened Check:
-                # 1. Exact match in list
-                # 2. Substring match (e.g. "PART NOT FOUND" contains "NOT FOUND")
                 is_missing = False
-                if val in missing_indicators:
-                    is_missing = True
-                elif 'NOT FOUND' in val or 'UNKNOWN' in val:
-                    is_missing = True
+                if val in missing_indicators: is_missing = True
+                elif 'NOT FOUND' in val or 'UNKNOWN' in val: is_missing = True
                 
-                if is_missing:
-                    missing_fields_count += 1
-                else:
-                    filled_critical_fields += 1
-            # ------------------------------------
+                if is_missing: missing_fields_count += 1
+                else: filled_critical_fields += 1
             
             row = {
-                'NO.': equip_count,
-                'EQUIPMENT NO. ': f"V-{equip_count:03d}",
+                'NO.': row_counter,               # 1, 2, 3, 4, 5...
+                'EQUIPMENT NO. ': f"V-{equip_count:03d}", # V-001, V-001, V-001... until new file
                 'PMT NO.': os.path.splitext(d['source_drawing'])[0],
                 'EQUIPMENT DESCRIPTION': "",
                 'PARTS': d.get('part_name'),
@@ -912,27 +920,22 @@ def preview_data(temp_file):
             }
             preview_rows.append(row)
             
-        # --- FINAL CALCULATION ---
         if total_critical_fields > 0:
             confidence_score = round((filled_critical_fields / total_critical_fields) * 100, 1)
         else:
             confidence_score = 0
-        # -------------------------
 
-        # --- NEW: GET UNIQUE SOURCE FILES FOR THE PDF VIEWER ---
-        # Extract unique source_drawing names using a set, then convert back to list
         unique_files = list(set(row['source_drawing'] for row in preview_rows if row.get('source_drawing')))
-        unique_files.sort() # Sort them alphabetically
-        # -------------------------------------------------------
+        unique_files.sort()
             
         return render_template(
             'preview.html', 
             data_rows=preview_rows, 
-            equipment_count=equip_count, 
+            equipment_count=equip_count, # Pass total Equipment count (not row count)
             temp_file=temp_file,
             confidence_score=confidence_score,
             missing_fields_count=missing_fields_count,
-            unique_files=unique_files # <--- Pass this new variable to the template
+            unique_files=unique_files
         )
     except Exception as e:
         flash(f"Error loading preview: {e}", "error")
