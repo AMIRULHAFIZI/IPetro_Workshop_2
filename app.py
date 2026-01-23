@@ -321,7 +321,7 @@ def generate_ppt_internal(filename):
                 tf_tag.paragraphs[0].font.name = 'Times New Roman'
                 tf_tag.paragraphs[0].font.bold = True
 
-                txBox_pmt = slide.shapes.add_textbox(Inches(8.5), Inches(0.55), Inches(1.8), Inches(0.4))
+                txBox_pmt = slide.shapes.add_textbox(Inches(8.1), Inches(0.55), Inches(1.8), Inches(0.4))
                 tf_pmt = txBox_pmt.text_frame
                 tf_pmt.text = current_pmt
                 tf_pmt.paragraphs[0].font.size = Pt(6)
